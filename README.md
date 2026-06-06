@@ -4,6 +4,21 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 
 ---
 
+## Features
+
+| Feature | Summary |
+|---|---|
+| **FEN boards** | Paste any FEN string to render an interactive board. Click a piece to see its legal moves highlighted; click a destination to play the move. |
+| **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons or by clicking any move token in the move list. |
+| **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
+| **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
+| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyse button. Coloured arrows show the top moves; a score list shows evaluations and principal variations. |
+| **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
+| **Board orientation** | Flip any board to Black's perspective with `orientation: black`. |
+| **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
+
+---
+
 ## Table of contents
 
 - [Installation](#installation)
@@ -13,6 +28,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
   - [PGN blocks](#pgn-blocks)
   - [Combined FEN + PGN](#combined-fen--pgn)
   - [Analysis blocks](#analysis-blocks)
+  - [User-drawn arrows](#user-drawn-arrows)
 - [Board themes](#board-themes)
 - [Engine analysis](#engine-analysis)
   - [Installing Stockfish](#installing-stockfish)
@@ -185,6 +201,30 @@ When you click **Analyse**:
 
 See [Engine analysis](#engine-analysis) for setup instructions.
 
+### User-drawn arrows
+
+Draw your own annotation arrows directly on any interactive FEN board.
+
+| Gesture | Effect |
+|---|---|
+| **Right-click drag** from square A to square B | Draws an orange arrow from A → B |
+| **Right-click drag** the same arrow again | Removes the arrow |
+| **Right-click** on a single square (no drag) | Removes all arrows originating from that square |
+
+After drawing an arrow a small floating input appears — type a comment and press **Enter** to attach it as a label on the arrow, or press **Esc** / click outside to skip.
+
+**Example — annotate a key idea:**
+
+````markdown
+```chess
+fen: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
+```
+````
+
+Open the note, right-click-drag from **f3** to **e5** to draw a "knight attacks" arrow, then type `Knight fork threat` as the comment.
+
+Arrows are in-memory — they reset when the note is closed. Engine analysis arrows and user arrows coexist independently.
+
 ---
 
 ## Board themes
@@ -309,6 +349,8 @@ See [Plugin settings](#plugin-settings) above.
 - **Click or tap** a piece to select it. Legal destination squares appear as dots.
 - **Click or tap** a highlighted dot to move the piece there.
 - **Click or tap** elsewhere to deselect.
+- **Right-click drag** from one square to another to draw an annotation arrow.
+- **Right-click drag** the same arrow again to remove it.
 - In the PGN viewer, **click any move token** in the move list to jump to that position.
 - The prev/next buttons have a minimum tap target of 44 × 36 px for comfortable mobile use.
 - The board uses pointer events, so mouse and touch are handled by the same code path with no 300 ms tap delay.
@@ -332,7 +374,7 @@ npm install
 |---|---|
 | `npm run build` | Type-check + production bundle → `dist/main.js` + `dist/styles.css` |
 | `npm run dev` | Watch mode (rebuilds on save, skips type-check) |
-| `npm test` | Run all 204 tests with Vitest |
+| `npm test` | Run all 210 tests with Vitest |
 
 **Deploy to the test vault:**
 
@@ -375,14 +417,14 @@ src/
 | `legal.ts` | Generate all legal moves for a position, including castling, en passant, and pin/check filtering |
 | `engine.ts` | UCI protocol helpers: `positionToUci`, `parseInfoLine`, `parseBestMove`, `scoreToString` |
 
-Every function in `core/` is pure: same inputs always produce the same output, no side effects. All 204 tests run in < 250 ms.
+Every function in `core/` is pure: same inputs always produce the same output, no side effects. All 210 tests run in < 250 ms.
 
 ### `render/`
 
 | File | Responsibility |
 |---|---|
-| `config.ts` | `BoardConfig`, `BoardColors`, theme definitions, `EngineArrow` |
-| `board.ts` | Render a `BoardState` to an SVG string; overlays for selected square, legal move dots, and engine arrows |
+| `config.ts` | `BoardConfig`, `BoardColors`, theme definitions, `EngineArrow`, `UserArrow` |
+| `board.ts` | Render a `BoardState` to an SVG string; overlays for selected square, legal move dots, engine arrows, and user-drawn arrows with optional labels |
 | `controls.ts` | Build position snapshots from a PGN move list; render the full PGN viewer HTML |
 
 No Obsidian imports. Can be used in any browser or test environment.
