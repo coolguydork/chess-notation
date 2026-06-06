@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFEN } from "../../src/core/fen";
+import { parseFEN, serializeFEN } from "../../src/core/fen";
 import type { BoardState } from "../../src/core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -116,5 +116,27 @@ describe("parseFEN", () => {
     it("throws on invalid piece character", () => {
       expect(() => parseFEN("rnbqkXnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")).toThrow();
     });
+  });
+});
+
+describe("serializeFEN", () => {
+  it("round-trips the starting position", () => {
+    const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    expect(serializeFEN(parseFEN(fen))).toBe(fen);
+  });
+
+  it("round-trips a mid-game position with en passant", () => {
+    const fen = "rnbqkbnr/pppp1ppp/8/4pP2/8/8/PPPPP1PP/RNBQKBNR w KQkq e6 0 3";
+    expect(serializeFEN(parseFEN(fen))).toBe(fen);
+  });
+
+  it("round-trips a position with partial castling rights", () => {
+    const fen = "r3k2r/8/8/8/8/8/8/R3K2R b Kq - 5 20";
+    expect(serializeFEN(parseFEN(fen))).toBe(fen);
+  });
+
+  it("serializes no castling rights as '-'", () => {
+    const fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
+    expect(serializeFEN(parseFEN(fen))).toBe(fen);
   });
 });

@@ -91,18 +91,50 @@ function renderCoordinates(config: BoardConfig): string {
   return parts.join("\n  ");
 }
 
+function renderHighlights(config: BoardConfig): string {
+  const { squareSize, orientation, selectedSquare, legalTargets } = config;
+  if (selectedSquare === undefined && !legalTargets?.size) return "";
+
+  const parts: string[] = [];
+
+  if (selectedSquare !== undefined) {
+    const { col, row } = indexToColRow(selectedSquare, orientation);
+    const x = col * squareSize;
+    const y = row * squareSize;
+    parts.push(
+      `<rect x="${x}" y="${y}" width="${squareSize}" height="${squareSize}" fill="rgba(255,255,0,0.45)" data-square="${selectedSquare}"/>`
+    );
+  }
+
+  if (legalTargets) {
+    const dotR = Math.round(squareSize * 0.15);
+    for (const idx of legalTargets) {
+      const { col, row } = indexToColRow(idx, orientation);
+      const cx = col * squareSize + squareSize / 2;
+      const cy = row * squareSize + squareSize / 2;
+      parts.push(
+        `<circle cx="${cx}" cy="${cy}" r="${dotR}" fill="rgba(0,0,0,0.25)" data-square="${idx}"/>`
+      );
+    }
+  }
+
+  return parts.join("\n  ");
+}
+
 export function renderBoard(state: BoardState, config: BoardConfig): string {
   const size = config.squareSize * 8;
 
   const squares = renderSquares(config);
   const coordinates = renderCoordinates(config);
   const pieces = renderPieces(state.board, config);
+  const highlights = renderHighlights(config);
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="chess-board-svg">`,
     `  <!-- squares -->`,
     `  ${squares}`,
     coordinates ? `  <!-- coordinates -->\n  ${coordinates}` : "",
+    highlights ? `  <!-- highlights -->\n  ${highlights}` : "",
     `  <!-- pieces -->`,
     `  ${pieces}`,
     `</svg>`,

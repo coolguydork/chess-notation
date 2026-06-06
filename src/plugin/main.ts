@@ -4,8 +4,10 @@ import { parseFEN } from "../core/fen";
 import { parsePGN } from "../core/pgn";
 import { renderBoard } from "../render/board";
 import { buildSnapshots, renderControls } from "../render/controls";
+import { getSquareLegalMoves } from "../core/legal";
+import { applyMove } from "../core/moves";
 import { DEFAULT_BOARD_CONFIG, BoardConfig, PieceSource } from "../render/config";
-import type { Piece } from "../core/types";
+import type { Piece, BoardState } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -64,6 +66,73 @@ function parseBlock(source: string): ChessBlockParams {
   return params;
 }
 
+// Returns the board square index clicked from an SVG mouse event,
+// or null if the click wasn't on a square/highlight element.
+function squareFromEvent(e: MouseEvent, squareSize: number, orientation: "white" | "black"): number | null {
+  const svg = (e.currentTarget as HTMLElement).querySelector("svg.chess-board-svg");
+  if (!svg) return null;
+  const rect = svg.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const scale = rect.width / (squareSize * 8);
+  const col = Math.floor(x / (squareSize * scale));
+  const row = Math.floor(y / (squareSize * scale));
+  if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+  const file = orientation === "white" ? col : 7 - col;
+  const rank = orientation === "white" ? 7 - row : row;
+  return (7 - rank) * 8 + file;
+}
+
+function mountInteractiveBoard(
+  wrapper: HTMLElement,
+  initialState: BoardState,
+  baseConfig: BoardConfig
+): void {
+  let state = initialState;
+  let selected: number | null = null;
+  let legalTargets = new Set<number>();
+
+  function render(): void {
+    const config: BoardConfig = {
+      ...baseConfig,
+      selectedSquare: selected ?? undefined,
+      legalTargets: legalTargets.size > 0 ? legalTargets : undefined,
+    };
+    wrapper.innerHTML = renderBoard(state, config);
+  }
+
+  wrapper.addEventListener("click", (e) => {
+    const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
+    if (idx === null) return;
+
+    if (selected !== null && legalTargets.has(idx)) {
+      // Apply the move
+      const moves = getSquareLegalMoves(state, selected);
+      // Prefer queen promotion if multiple promotion options land on same square
+      const move = moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r")
+        ?? moves.find(m => m.to === idx);
+      if (move) {
+        state = applyMove(state, move.san);
+      }
+      selected = null;
+      legalTargets = new Set();
+    } else {
+      const piece = state.board[idx];
+      if (piece && piece.color === state.activeColor) {
+        selected = idx;
+        const moves = getSquareLegalMoves(state, idx);
+        legalTargets = new Set(moves.map(m => m.to));
+      } else {
+        selected = null;
+        legalTargets = new Set();
+      }
+    }
+    render();
+  });
+
+  render();
+}
+
 export default class ChessPlugin extends Plugin {
   async onload(): Promise<void> {
     this.registerMarkdownCodeBlockProcessor(
@@ -77,7 +146,7 @@ export default class ChessPlugin extends Plugin {
             this.app.vault.adapter.getResourcePath(path);
 
           const pieceSource = DEFAULT_BOARD_CONFIG.pieceSource;
-          const config: BoardConfig = {
+          const baseConfig: BoardConfig = {
             ...DEFAULT_BOARD_CONFIG,
             orientation: params.orientation ?? DEFAULT_BOARD_CONFIG.orientation,
             resolvePieceUrl: (piece) =>
@@ -85,15 +154,14 @@ export default class ChessPlugin extends Plugin {
           };
 
           if (params.fen && !params.pgn) {
-            // Phase 1 path: static board from FEN
+            // Static FEN board — interactive (click to move)
             const state = parseFEN(params.fen);
-            const svg = renderBoard(state, config);
             const wrapper = el.createDiv({ cls: "chess-board" });
-            wrapper.innerHTML = svg;
+            mountInteractiveBoard(wrapper, state, baseConfig);
             return;
           }
 
-          // Phase 2 path: PGN with move navigation
+          // PGN viewer with move navigation
           const game = parsePGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           const snapshots = buildSnapshots(startFen, game.moves);
@@ -103,7 +171,7 @@ export default class ChessPlugin extends Plugin {
           const wrapper = el.createDiv({ cls: "chess-viewer-wrapper" });
 
           function render(): void {
-            wrapper.innerHTML = renderControls(snapshots, currentIndex, config, game.result);
+            wrapper.innerHTML = renderControls(snapshots, currentIndex, baseConfig, game.result);
             attachHandlers();
           }
 

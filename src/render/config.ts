@@ -21,6 +21,11 @@ export interface BoardConfig {
   // Resolves a piece to a URL or data-URI for use in <image href="...">.
   // Provided by plugin/ based on pieceSource; render/ never constructs URLs.
   resolvePieceUrl: (piece: Piece) => string;
+  // Optional square highlights: set of board indices to overlay.
+  // selectedSquare — the clicked piece's square (filled tint).
+  // legalTargets   — destination squares for the selected piece (dot overlay).
+  selectedSquare?: number;
+  legalTargets?: ReadonlySet<number>;
 }
 
 export const DEFAULT_COLORS: BoardColors = {

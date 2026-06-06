@@ -97,3 +97,47 @@ export function parseFEN(fen: string): BoardState {
     fullmoveNumber,
   };
 }
+
+export function serializeFEN(state: BoardState): string {
+  // Piece placement
+  const ranks: string[] = [];
+  for (let rankRow = 0; rankRow < 8; rankRow++) {
+    let rank = "";
+    let empty = 0;
+    for (let file = 0; file < 8; file++) {
+      const piece = state.board[rankRow * 8 + file];
+      if (!piece) {
+        empty++;
+      } else {
+        if (empty > 0) { rank += empty; empty = 0; }
+        const ch = piece.type === "k" || piece.type === "q" || piece.type === "r" ||
+                   piece.type === "b" || piece.type === "n" || piece.type === "p"
+          ? piece.type
+          : piece.type;
+        rank += piece.color === "w" ? ch.toUpperCase() : ch;
+      }
+    }
+    if (empty > 0) rank += empty;
+    ranks.push(rank);
+  }
+
+  const castling = [
+    state.castling.whiteKingside  ? "K" : "",
+    state.castling.whiteQueenside ? "Q" : "",
+    state.castling.blackKingside  ? "k" : "",
+    state.castling.blackQueenside ? "q" : "",
+  ].join("") || "-";
+
+  const ep = state.enPassant
+    ? String.fromCharCode(97 + state.enPassant.file) + String(state.enPassant.rank + 1)
+    : "-";
+
+  return [
+    ranks.join("/"),
+    state.activeColor,
+    castling,
+    ep,
+    state.halfmoveClock,
+    state.fullmoveNumber,
+  ].join(" ");
+}

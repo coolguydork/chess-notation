@@ -1,4 +1,4 @@
-import type { BoardState, Board, Square, Piece, Color, PieceType, CastlingRights } from "./types";
+import type { BoardState, Board, Piece, Color, PieceType, CastlingRights } from "./types";
 import { applyMove } from "./moves";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,6 @@ const PIECE_LETTER: Record<PieceType, string> = {
 };
 
 function buildSan(
-  board: Board,
   from: number,
   to: number,
   piece: Piece,
@@ -354,7 +353,7 @@ export function getLegalMoves(state: BoardState): LegalMove[] {
       .concat([pm.from]);
 
     const isCapture = board[pm.to] !== null || (piece.type === "p" && pm.to === epIdx);
-    const finalSan = buildSan(board, pm.from, pm.to, piece, isCapture, pm.promotion, allFromForTo, afterState);
+    const finalSan = buildSan(pm.from, pm.to, piece, isCapture, pm.promotion, allFromForTo, afterState);
 
     legal.push({ from: pm.from, to: pm.to, san: finalSan, promotion: pm.promotion });
   }
@@ -364,7 +363,7 @@ export function getLegalMoves(state: BoardState): LegalMove[] {
 
 // Build a temporary SAN without check suffix (used only to call applyMove for legality testing)
 function toSanForCheck(pm: PseudoMove, board: Board, piece: Piece, state: BoardState, pseudoAll: PseudoMove[]): string {
-  const { file: toFile, rank: toRank } = squareCoords(pm.to);
+  const { file: toFile } = squareCoords(pm.to);
   const toAlg = indexToAlgebraic(pm.to);
   const { file: fromFile, rank: fromRank } = squareCoords(pm.from);
   const epIdx = state.enPassant ? squareIndex(state.enPassant.file, state.enPassant.rank) : null;
