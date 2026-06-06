@@ -1,0 +1,106 @@
+.chess-board,
+.chess-viewer-wrapper {
+  display: inline-block;
+  max-width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation; /* prevents 300ms tap delay on mobile */
+}
+
+.chess-board-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chess-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.chess-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.chess-nav button {
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 1em;
+  /* Larger tap target for mobile */
+  min-width: 44px;
+  min-height: 36px;
+  touch-action: manipulation;
+}
+
+.chess-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chess-move-list {
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+  line-height: 1.8;
+  max-width: 100%;
+  flex-wrap: wrap;
+  display: flex;
+  align-items: baseline;
+  gap: 2px 0;
+}
+
+.chess-move-number {
+  color: var(--text-muted);
+  margin-right: 3px;
+}
+
+.chess-move {
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chess-move:hover {
+  background: var(--background-modifier-hover);
+}
+
+.chess-move[data-active="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 3px;
+}
+
+.chess-result {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.chess-error {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+
+/* Responsive: on narrow viewports let the board fill available width */
+@media (max-width: 480px) {
+  .chess-board,
+  .chess-viewer-wrapper {
+    width: 100%;
+  }
+}

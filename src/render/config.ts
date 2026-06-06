@@ -28,10 +28,29 @@ export interface BoardConfig {
   legalTargets?: ReadonlySet<number>;
 }
 
-export const DEFAULT_COLORS: BoardColors = {
-  light: "#f0d9b5",
-  dark: "#b58863",
+// ---------------------------------------------------------------------------
+// Board color themes
+// ---------------------------------------------------------------------------
+
+export const BOARD_THEMES: Record<string, BoardColors> = {
+  classic: { light: "#f0d9b5", dark: "#b58863" }, // Lichess brown
+  blue:    { light: "#dee3e6", dark: "#8ca2ad" }, // Lichess blue
+  green:   { light: "#ffffdd", dark: "#86a666" }, // Chess.com green
+  dark:    { light: "#aaaaaa", dark: "#555555" }, // High-contrast dark
+  walnut:  { light: "#f0c88a", dark: "#8b5a2b" }, // Warm walnut
+  purple:  { light: "#e8d5f5", dark: "#7c4a8c" }, // Soft purple
 };
+
+export type BoardThemeName = keyof typeof BOARD_THEMES;
+
+export const themeNames: string[] = Object.keys(BOARD_THEMES);
+
+export function getBoardColors(theme: string | undefined): BoardColors {
+  if (theme && theme in BOARD_THEMES) return BOARD_THEMES[theme];
+  return BOARD_THEMES["classic"];
+}
+
+export const DEFAULT_COLORS: BoardColors = BOARD_THEMES["classic"];
 
 export const DEFAULT_BOARD_CONFIG: Omit<BoardConfig, "resolvePieceUrl"> = {
   orientation: "white",
