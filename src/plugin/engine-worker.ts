@@ -9,9 +9,12 @@ import { positionToUci, parseInfoLine, parseBestMove } from "../core/engine";
 export interface EngineWorkerConfig {
   mode: EngineMode;
   externalPath?: string; // explicit binary path; auto-discovered when absent
+  wasmDir?: string;      // directory containing stockfish-18-lite-single.{js,wasm}
   multiPV?: number;      // default 3
   depth?: number;        // default 20
 }
+
+const STOCKFISH_JS = "stockfish-18-lite-single.js";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -58,6 +61,68 @@ export function collectAnalysis(lines: string[]): AnalysisResult {
     .map(([, move]) => move);
 
   return { moves, bestMove };
+}
+
+// ---------------------------------------------------------------------------
+// WASM worker helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+export interface WorkerLike {
+  postMessage(msg: string): void;
+  onmessage: ((event: { data: string }) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  terminate(): void;
+}
+
+/**
+ * Run a full UCI analysis session over an abstract worker.
+ * Sends the first three commands (uci, setoption, isready) immediately;
+ * position + go are sent after readyok is received.
+ */
+export function runWasmAnalysis(
+  worker: WorkerLike,
+  commands: string[]
+): Promise<AnalysisResult> {
+  return new Promise<AnalysisResult>((resolve, reject) => {
+    const outputLines: string[] = [];
+    let readyOkSeen = false;
+    let resolved = false;
+
+    const finish = (result: AnalysisResult): void => {
+      resolved = true;
+      worker.terminate();
+      resolve(result);
+    };
+
+    worker.onmessage = ({ data }: { data: string }): void => {
+      const line = data.trim();
+      if (!line) return;
+      outputLines.push(line);
+
+      if (!readyOkSeen && line === "readyok") {
+        readyOkSeen = true;
+        worker.postMessage(commands[3]); // position
+        worker.postMessage(commands[4]); // go depth
+        return;
+      }
+
+      if (!resolved && line.startsWith("bestmove")) {
+        finish(collectAnalysis(outputLines));
+      }
+    };
+
+    worker.onerror = (event: ErrorEvent): void => {
+      if (!resolved) {
+        resolved = true;
+        worker.terminate();
+        reject(new Error(event.message));
+      }
+    };
+
+    worker.postMessage(commands[0]); // uci
+    worker.postMessage(commands[1]); // setoption
+    worker.postMessage(commands[2]); // isready
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +180,7 @@ export class EngineWorker {
     this.config = {
       mode: config.mode,
       externalPath: config.externalPath ?? "",
+      wasmDir: config.wasmDir ?? "",
       multiPV: config.multiPV ?? 3,
       depth: config.depth ?? 20,
     };
@@ -123,7 +189,13 @@ export class EngineWorker {
   /** Check whether a usable engine is reachable. */
   async probe(): Promise<boolean> {
     if (this.config.mode === "wasm") {
-      return false; // WASM not yet bundled
+      if (!this.config.wasmDir) return false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodePath = (globalThis as any).require("path") as typeof import("path");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fs = (globalThis as any).require("fs") as typeof import("fs");
+      const jsPath = nodePath.join(this.config.wasmDir, STOCKFISH_JS);
+      return fs.existsSync(jsPath);
     }
     const path = await findExternalBinary(this.config.externalPath || undefined);
     if (path) this.binaryPath = path;
@@ -133,7 +205,14 @@ export class EngineWorker {
   /** Analyse a position. Resolves with the best lines found at the configured depth. */
   async analyse(state: BoardState, history: string[]): Promise<AnalysisResult> {
     if (this.config.mode === "wasm") {
-      throw new Error("WASM engine not yet available");
+      if (!this.config.wasmDir) throw new Error("wasmDir not configured");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodePath = (globalThis as any).require("path") as typeof import("path");
+      const jsPath = nodePath.join(this.config.wasmDir, STOCKFISH_JS);
+      const worker = new Worker(`file://${jsPath}`) as unknown as WorkerLike;
+      const { depth, multiPV } = this.config;
+      const commands = buildUciCommands(state, history, depth, multiPV);
+      return runWasmAnalysis(worker, commands);
     }
 
     if (!this.binaryPath) {

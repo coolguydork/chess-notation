@@ -496,9 +496,15 @@ export default class ChessPlugin extends Plugin {
       this.engineWorker.path !== this.settings.enginePath
     ) {
       this.engineWorker?.dispose();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const adapter = (this.app.vault.adapter as any);
+      const pluginDir = adapter.getBasePath
+        ? `${adapter.getBasePath()}/.obsidian/plugins/${this.manifest.id}`
+        : "";
       this.engineWorker = new EngineWorker({
         mode: this.settings.engineMode,
         externalPath: this.settings.enginePath || undefined,
+        wasmDir: pluginDir,
         depth: this.settings.engineDepth,
         multiPV: this.settings.engineMultiPV,
       });
