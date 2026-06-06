@@ -432,7 +432,7 @@ class ChessSettingTab extends PluginSettingTab {
       .addDropdown((drop) => {
         drop.addOption("auto", "Auto (discover on PATH)");
         drop.addOption("external", "External binary (specify path below)");
-        drop.addOption("wasm", "WASM (bundled — not yet available)");
+        drop.addOption("wasm", "WASM (bundled)");
         drop.setValue(this.plugin.settings.engineMode);
         drop.onChange(async (value) => {
           this.plugin.settings.engineMode = value as "auto" | "external" | "wasm";
