@@ -126,33 +126,6 @@ export function runWasmAnalysis(
 }
 
 // ---------------------------------------------------------------------------
-// WASM worker creation (Electron / Node.js worker_threads)
-// ---------------------------------------------------------------------------
-
-const BRIDGE_JS = "stockfish-worker-bridge.js";
-
-/**
- * Wraps a worker_threads Worker in the WorkerLike interface so runWasmAnalysis
- * can drive it without knowing about the Node.js event-emitter API.
- */
-function adaptWorkerThreads(wt: {
-  postMessage(msg: unknown): void;
-  terminate(): void;
-  on(event: "message", cb: (data: string) => void): void;
-  on(event: "error", cb: (err: Error) => void): void;
-}): WorkerLike {
-  const adapter: WorkerLike = {
-    onmessage: null,
-    onerror: null,
-    postMessage: (msg) => wt.postMessage(msg),
-    terminate: () => wt.terminate(),
-  };
-  wt.on("message", (data) => adapter.onmessage?.({ data }));
-  wt.on("error", (err) => adapter.onerror?.({ message: err.message } as ErrorEvent));
-  return adapter;
-}
-
-// ---------------------------------------------------------------------------
 // Engine worker class
 // ---------------------------------------------------------------------------
 
@@ -234,16 +207,47 @@ export class EngineWorker {
     if (this.config.mode === "wasm") {
       if (!this.config.wasmDir) throw new Error("wasmDir not configured");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodePath = (globalThis as any).require("path") as typeof import("path");
+      const req = (globalThis as any).require as NodeRequire;
+      // require() resolves __dirname to wasmDir, so the .wasm file is found automatically.
+      // The lite-single build is compiled with Emscripten asyncify, so the go command
+      // yields to the event loop rather than blocking the renderer.
+      const Stockfish = req(req("path").join(this.config.wasmDir, STOCKFISH_JS));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { Worker: NodeWorker } = (globalThis as any).require("worker_threads") as typeof import("worker_threads");
-      const jsPath = nodePath.join(this.config.wasmDir, STOCKFISH_JS);
-      const bridgePath = nodePath.join(this.config.wasmDir, BRIDGE_JS);
-      const wt = new NodeWorker(bridgePath, { workerData: { jsPath, wasmDir: this.config.wasmDir } });
-      const worker = adaptWorkerThreads(wt);
+      const engine: any = await Stockfish();
+
       const { depth, multiPV } = this.config;
       const commands = buildUciCommands(state, history, depth, multiPV);
-      return runWasmAnalysis(worker, commands);
+      const outputLines: string[] = [];
+      let readyOkSeen = false;
+
+      return new Promise<AnalysisResult>((resolve, reject) => {
+        engine.listener = (line: string): void => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          outputLines.push(trimmed);
+
+          if (!readyOkSeen && trimmed === "readyok") {
+            readyOkSeen = true;
+            engine.ccall("command", null, ["string"], [commands[3]], { async: false }); // position
+            // go uses asyncify — yields to event loop during search
+            (engine.ccall("command", null, ["string"], [commands[4]], { async: true }) as Promise<void>)
+              .catch(reject);
+            return;
+          }
+
+          if (trimmed.startsWith("bestmove")) {
+            resolve(collectAnalysis(outputLines));
+          }
+        };
+
+        try {
+          engine.ccall("command", null, ["string"], [commands[0]], { async: false }); // uci
+          engine.ccall("command", null, ["string"], [commands[1]], { async: false }); // setoption
+          engine.ccall("command", null, ["string"], [commands[2]], { async: false }); // isready
+        } catch (e) {
+          reject(e);
+        }
+      });
     }
 
     if (!this.binaryPath) {
