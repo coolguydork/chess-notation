@@ -208,12 +208,27 @@ export class EngineWorker {
       if (!this.config.wasmDir) throw new Error("wasmDir not configured");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const req = (globalThis as any).require as NodeRequire;
-      // require() resolves __dirname to wasmDir, so the .wasm file is found automatically.
-      // The lite-single build is compiled with Emscripten asyncify, so the go command
-      // yields to the event loop rather than blocking the renderer.
-      const Stockfish = req(req("path").join(this.config.wasmDir, STOCKFISH_JS));
+      const wasmDir = this.config.wasmDir;
+      const nodePath = req("path") as typeof import("path");
+
+      // The stockfish JS exports an outer factory; calling it returns the inner
+      // Emscripten factory. Calling the inner factory with a config object extends
+      // that object in-place with the full WASM module (including ccall).
+      const outerFactory = req(nodePath.join(wasmDir, STOCKFISH_JS)) as () => (cfg: object) => Promise<void>;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const engine: any = await Stockfish();
+      const engine: any = {
+        locateFile: (file: string) => nodePath.join(wasmDir, file),
+      };
+      await outerFactory()(engine);
+
+      // Poll until Stockfish's UCI loop has started (mirrors what the package's index.js does).
+      await new Promise<void>((resolve) => {
+        const check = (): void => {
+          if (!engine._isReady || engine._isReady()) return resolve();
+          setTimeout(check, 10);
+        };
+        check();
+      });
 
       const { depth, multiPV } = this.config;
       const commands = buildUciCommands(state, history, depth, multiPV);
@@ -245,7 +260,7 @@ export class EngineWorker {
           engine.ccall("command", null, ["string"], [commands[1]], { async: false }); // setoption
           engine.ccall("command", null, ["string"], [commands[2]], { async: false }); // isready
         } catch (e) {
-          reject(e);
+          reject(e as Error);
         }
       });
     }
