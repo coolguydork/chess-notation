@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderBoard } from "../../src/render/board";
+import { renderBoard, uciSquareToIndex } from "../../src/render/board";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
 import type { Piece } from "../../src/core/types";
@@ -90,4 +90,44 @@ describe("renderBoard", () => {
     const svg = renderBoard(parseFEN(STARTING_FEN), testConfig);
     expect(svg).not.toContain("<text");
   });
+
+  it("renders no arrows when engineArrows is absent", () => {
+    const svg = renderBoard(parseFEN(STARTING_FEN), testConfig);
+    expect(svg).not.toContain("<line ");
+    expect(svg).not.toContain("<marker ");
+  });
+
+  it("renders a <line> element for each engine arrow", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      engineArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "green" },
+        { from: uciSquareToIndex("d2"), to: uciSquareToIndex("d4"), color: "blue" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect((svg.match(/<line /g) ?? []).length).toBe(2);
+  });
+
+  it("includes an arrowhead marker definition for each unique arrow color", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      engineArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "green" },
+        { from: uciSquareToIndex("d2"), to: uciSquareToIndex("d4"), color: "green" },
+        { from: uciSquareToIndex("c2"), to: uciSquareToIndex("c4"), color: "blue" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect((svg.match(/<marker /g) ?? []).length).toBe(2); // two unique colors
+  });
+});
+
+describe("uciSquareToIndex", () => {
+  it("converts a1 to index 56", () => expect(uciSquareToIndex("a1")).toBe(56));
+  it("converts h1 to index 63", () => expect(uciSquareToIndex("h1")).toBe(63));
+  it("converts a8 to index 0",  () => expect(uciSquareToIndex("a8")).toBe(0));
+  it("converts h8 to index 7",  () => expect(uciSquareToIndex("h8")).toBe(7));
+  it("converts e2 to index 52", () => expect(uciSquareToIndex("e2")).toBe(52));
+  it("converts e4 to index 36", () => expect(uciSquareToIndex("e4")).toBe(36));
 });

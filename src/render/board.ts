@@ -1,5 +1,5 @@
 import type { BoardState, Square } from "../core/types";
-import type { BoardConfig } from "./config";
+import type { BoardConfig, EngineArrow } from "./config";
 
 // Maps board index → { col, row } in SVG space (0,0 = top-left).
 // When orientation is "white": a8=index 0 → col 0, row 0.
@@ -121,6 +121,56 @@ function renderHighlights(config: BoardConfig): string {
   return parts.join("\n  ");
 }
 
+/** Convert a UCI square string ("e2") to a board index (0–63). */
+export function uciSquareToIndex(sq: string): number {
+  const file = sq.charCodeAt(0) - 97; // 'a'=0
+  const rank = parseInt(sq[1], 10) - 1; // '1'=0
+  return (7 - rank) * 8 + file;
+}
+
+function renderArrows(arrows: EngineArrow[], config: BoardConfig): string {
+  if (!arrows.length) return "";
+  const { squareSize, orientation } = config;
+  const parts: string[] = [];
+
+  // One arrowhead marker def per unique color
+  const colors = [...new Set(arrows.map(a => a.color))];
+  const defs = colors.map(color => {
+    const id = `arrowhead-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
+    return `<marker id="${id}" markerWidth="4" markerHeight="4" refX="2.5" refY="2" orient="auto">` +
+      `<path d="M0,0 L0,4 L4,2 z" fill="${color}"/></marker>`;
+  }).join("");
+  parts.push(`<defs>${defs}</defs>`);
+
+  for (const arrow of arrows) {
+    const from = indexToColRow(arrow.from, orientation);
+    const to = indexToColRow(arrow.to, orientation);
+
+    const x1 = from.col * squareSize + squareSize / 2;
+    const y1 = from.row * squareSize + squareSize / 2;
+    const x2 = to.col * squareSize + squareSize / 2;
+    const y2 = to.row * squareSize + squareSize / 2;
+
+    // Shorten the line so the arrowhead lands at the square centre
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const shorten = squareSize * 0.3;
+    const ex = x2 - (dx / len) * shorten;
+    const ey = y2 - (dy / len) * shorten;
+
+    const colorId = `arrowhead-${arrow.color.replace(/[^a-zA-Z0-9]/g, "")}`;
+    const strokeW = Math.round(squareSize * 0.12);
+    parts.push(
+      `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"` +
+      ` stroke="${arrow.color}" stroke-width="${strokeW}" stroke-linecap="round"` +
+      ` marker-end="url(#${colorId})" opacity="0.82"/>`
+    );
+  }
+
+  return parts.join("\n  ");
+}
+
 export function renderBoard(state: BoardState, config: BoardConfig): string {
   const size = config.squareSize * 8;
 
@@ -128,6 +178,7 @@ export function renderBoard(state: BoardState, config: BoardConfig): string {
   const coordinates = renderCoordinates(config);
   const pieces = renderPieces(state.board, config);
   const highlights = renderHighlights(config);
+  const arrows = renderArrows(config.engineArrows ?? [], config);
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="chess-board-svg">`,
@@ -135,6 +186,7 @@ export function renderBoard(state: BoardState, config: BoardConfig): string {
     `  ${squares}`,
     coordinates ? `  <!-- coordinates -->\n  ${coordinates}` : "",
     highlights ? `  <!-- highlights -->\n  ${highlights}` : "",
+    arrows ? `  <!-- engine arrows -->\n  ${arrows}` : "",
     `  <!-- pieces -->`,
     `  ${pieces}`,
     `</svg>`,

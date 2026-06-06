@@ -2,7 +2,7 @@ import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext } 
 import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parsePGN } from "../core/pgn";
-import { renderBoard } from "../render/board";
+import { renderBoard, uciSquareToIndex } from "../render/board";
 import { buildSnapshots, renderControls } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
@@ -10,9 +10,12 @@ import {
   DEFAULT_BOARD_CONFIG,
   BoardConfig,
   PieceSource,
+  EngineArrow,
   getBoardColors,
   themeNames,
 } from "../render/config";
+import { scoreToString } from "../core/engine";
+import { EngineWorker } from "./engine-worker";
 import type { Piece, BoardState } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -26,6 +29,10 @@ interface ChessPluginSettings {
   squareSize: number;
   showCoordinates: boolean;
   pieceSource: PieceSource;
+  engineMode: "auto" | "external" | "wasm";
+  enginePath: string;   // explicit binary path; empty = auto-discover
+  engineDepth: number;
+  engineMultiPV: number;
 }
 
 const DEFAULT_SETTINGS: ChessPluginSettings = {
@@ -33,6 +40,10 @@ const DEFAULT_SETTINGS: ChessPluginSettings = {
   squareSize: 60,
   showCoordinates: true,
   pieceSource: { type: "bundled" },
+  engineMode: "auto",
+  enginePath: "",
+  engineDepth: 18,
+  engineMultiPV: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -44,6 +55,7 @@ interface ChessBlockParams {
   pgn?: string;
   orientation?: "white" | "black";
   theme?: string;
+  analysis?: boolean;
 }
 
 function parseBlock(source: string): ChessBlockParams {
@@ -74,6 +86,10 @@ function parseBlock(source: string): ChessBlockParams {
   if ("theme" in parsed) {
     if (typeof parsed.theme !== "string") throw new Error("Chess block: 'theme' must be a string");
     params.theme = parsed.theme;
+  }
+
+  if ("analysis" in parsed) {
+    params.analysis = Boolean(parsed.analysis);
   }
 
   if (!params.fen && !params.pgn) {
@@ -176,6 +192,62 @@ function mountInteractiveBoard(
 }
 
 // ---------------------------------------------------------------------------
+// Analysis panel
+// ---------------------------------------------------------------------------
+
+const ARROW_COLORS = ["rgba(0,180,0,0.82)", "rgba(0,120,210,0.75)", "rgba(210,120,0,0.70)"];
+
+function uciToArrow(uciMove: string, color: string): EngineArrow {
+  const from = uciSquareToIndex(uciMove.slice(0, 2));
+  const to   = uciSquareToIndex(uciMove.slice(2, 4));
+  return { from, to, color };
+}
+
+function mountAnalysisPanel(
+  container: HTMLElement,
+  boardWrapper: HTMLElement,
+  state: BoardState,
+  baseConfig: BoardConfig,
+  getWorker: () => EngineWorker
+): void {
+  const panel = container.createDiv({ cls: "chess-analysis-panel" });
+  const btn   = panel.createEl("button", { text: "Analyse", cls: "chess-analyse-btn" });
+  const output = panel.createDiv({ cls: "chess-analysis-output" });
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Analysing…";
+    output.empty();
+
+    try {
+      const worker = getWorker();
+      const result = await worker.analyse(state, []);
+
+      // Draw arrows for each top move
+      const arrows: EngineArrow[] = result.moves.map((m, i) =>
+        uciToArrow(m.uci, ARROW_COLORS[i] ?? ARROW_COLORS[ARROW_COLORS.length - 1])
+      );
+      boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
+
+      // Show eval list
+      for (const move of result.moves) {
+        const row = output.createDiv({ cls: "chess-analysis-row" });
+        row.createSpan({ text: scoreToString(move.score), cls: "chess-analysis-score" });
+        row.createSpan({ text: move.pv.slice(0, 5).join(" "), cls: "chess-analysis-pv" });
+      }
+
+      btn.textContent = "Re-analyse";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output.createEl("p", { text: `Engine error: ${msg}`, cls: "chess-engine-error" });
+      btn.textContent = "Analyse";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Settings tab
 // ---------------------------------------------------------------------------
 
@@ -230,6 +302,63 @@ class ChessSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    containerEl.createEl("h3", { text: "Engine" });
+
+    new Setting(containerEl)
+      .setName("Engine mode")
+      .setDesc("How Stockfish is located. 'Auto' tries the system PATH, then common install locations.")
+      .addDropdown((drop) => {
+        drop.addOption("auto", "Auto (discover on PATH)");
+        drop.addOption("external", "External binary (specify path below)");
+        drop.addOption("wasm", "WASM (bundled — not yet available)");
+        drop.setValue(this.plugin.settings.engineMode);
+        drop.onChange(async (value) => {
+          this.plugin.settings.engineMode = value as "auto" | "external" | "wasm";
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Stockfish binary path")
+      .setDesc("Absolute path to the Stockfish executable. Leave blank to auto-discover.")
+      .addText((text) => {
+        text
+          .setPlaceholder("/opt/homebrew/bin/stockfish")
+          .setValue(this.plugin.settings.enginePath)
+          .onChange(async (value) => {
+            this.plugin.settings.enginePath = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Analysis depth")
+      .setDesc("How deeply Stockfish searches (higher = stronger but slower).")
+      .addSlider((slider) => {
+        slider
+          .setLimits(8, 30, 1)
+          .setValue(this.plugin.settings.engineDepth)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.engineDepth = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Lines shown (MultiPV)")
+      .setDesc("Number of top moves to display when analysing a position.")
+      .addSlider((slider) => {
+        slider
+          .setLimits(1, 5, 1)
+          .setValue(this.plugin.settings.engineMultiPV)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.engineMultiPV = value;
+            await this.plugin.saveSettings();
+          });
+      });
   }
 }
 
@@ -239,6 +368,24 @@ class ChessSettingTab extends PluginSettingTab {
 
 export default class ChessPlugin extends Plugin {
   settings!: ChessPluginSettings;
+  private engineWorker: EngineWorker | null = null;
+
+  getEngineWorker(): EngineWorker {
+    if (
+      !this.engineWorker ||
+      this.engineWorker.mode !== this.settings.engineMode ||
+      this.engineWorker.path !== this.settings.enginePath
+    ) {
+      this.engineWorker?.dispose();
+      this.engineWorker = new EngineWorker({
+        mode: this.settings.engineMode,
+        externalPath: this.settings.enginePath || undefined,
+        depth: this.settings.engineDepth,
+        multiPV: this.settings.engineMultiPV,
+      });
+    }
+    return this.engineWorker;
+  }
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -269,8 +416,13 @@ export default class ChessPlugin extends Plugin {
 
           if (params.fen && !params.pgn) {
             const state = parseFEN(params.fen);
-            const wrapper = el.createDiv({ cls: "chess-board" });
-            mountInteractiveBoard(wrapper, state, baseConfig);
+            const container = el.createDiv({ cls: "chess-analysis-container" });
+            const boardWrapper = container.createDiv({ cls: "chess-board" });
+            mountInteractiveBoard(boardWrapper, state, baseConfig);
+
+            if (params.analysis) {
+              mountAnalysisPanel(container, boardWrapper, state, baseConfig, this.getEngineWorker.bind(this));
+            }
             return;
           }
 
@@ -315,7 +467,9 @@ export default class ChessPlugin extends Plugin {
     );
   }
 
-  onunload(): void {}
+  onunload(): void {
+    this.engineWorker?.dispose();
+  }
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

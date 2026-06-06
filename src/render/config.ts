@@ -12,6 +12,12 @@ export interface BoardColors {
   dark: string;    // CSS color string, e.g. "#b58863"
 }
 
+export interface EngineArrow {
+  from: number;  // board index (0–63)
+  to: number;    // board index (0–63)
+  color: string; // CSS color string
+}
+
 export interface BoardConfig {
   orientation: "white" | "black";
   colors: BoardColors;
@@ -26,6 +32,8 @@ export interface BoardConfig {
   // legalTargets   — destination squares for the selected piece (dot overlay).
   selectedSquare?: number;
   legalTargets?: ReadonlySet<number>;
+  // Engine move arrows drawn over the board (Phase 5).
+  engineArrows?: EngineArrow[];
 }
 
 // ---------------------------------------------------------------------------

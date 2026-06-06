@@ -97,6 +97,68 @@
   white-space: pre-wrap;
 }
 
+/* Analysis panel */
+.chess-analysis-container {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.chess-analysis-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chess-analyse-btn {
+  align-self: flex-start;
+  padding: 4px 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  min-height: 32px;
+  touch-action: manipulation;
+}
+
+.chess-analyse-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chess-analysis-output {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-monospace);
+  font-size: 0.85em;
+}
+
+.chess-analysis-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.chess-analysis-score {
+  min-width: 4.5em;
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-accent);
+}
+
+.chess-analysis-pv {
+  color: var(--text-muted);
+}
+
+.chess-engine-error {
+  color: var(--text-error);
+  margin: 0;
+}
+
 /* Responsive: on narrow viewports let the board fill available width */
 @media (max-width: 480px) {
   .chess-board,

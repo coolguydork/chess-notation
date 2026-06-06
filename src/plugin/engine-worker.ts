@@ -103,11 +103,15 @@ function spawnProcess(binaryPath: string): ChildProcess {
 }
 
 export class EngineWorker {
+  readonly mode: EngineMode;
+  readonly path: string;
   private config: Required<EngineWorkerConfig>;
   private proc: ChildProcess | null = null;
   private binaryPath: string | null = null;
 
   constructor(config: EngineWorkerConfig) {
+    this.mode = config.mode;
+    this.path = config.externalPath ?? "";
     this.config = {
       mode: config.mode,
       externalPath: config.externalPath ?? "",
