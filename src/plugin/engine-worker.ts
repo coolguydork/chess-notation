@@ -215,9 +215,15 @@ export class EngineWorker {
       // Emscripten factory. Calling the inner factory with a config object extends
       // that object in-place with the full WASM module (including ccall).
       const outerFactory = req(nodePath.join(wasmDir, STOCKFISH_JS)) as () => (cfg: object) => Promise<void>;
+      const wasmPath = nodePath.join(wasmDir, "stockfish-18-lite-single.wasm");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const engine: any = {
-        locateFile: (file: string) => nodePath.join(wasmDir, file),
+        // The Emscripten module internally requests "stockfish.wasm" (hardcoded).
+        // Redirect any .wasm request to the actual versioned file alongside main.js.
+        locateFile: (file: string) =>
+          file.includes(".wasm") && !file.includes(".wasm.map")
+            ? wasmPath
+            : nodePath.join(wasmDir, file),
       };
       await outerFactory()(engine);
 
