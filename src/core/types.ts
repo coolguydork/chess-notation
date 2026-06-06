@@ -35,3 +35,22 @@ export interface BoardState {
   halfmoveClock: number;
   fullmoveNumber: number;
 }
+
+// ---------------------------------------------------------------------------
+// PGN types
+// ---------------------------------------------------------------------------
+
+export interface PgnMove {
+  san: string;
+  moveNumber: number;
+  color: Color;
+  comment?: string;
+  nags?: number[];
+  variations?: PgnMove[][];
+}
+
+export interface PgnGame {
+  headers: Record<string, string>;
+  moves: PgnMove[];
+  result: string; // "1-0" | "0-1" | "1/2-1/2" | "*"
+}
