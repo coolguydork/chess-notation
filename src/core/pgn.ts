@@ -14,8 +14,6 @@ type Token =
   | { type: "lparen" }
   | { type: "rparen" };
 
-const RESULT_RE = /^(1-0|0-1|1\/2-1\/2|\*)$/;
-
 // SAN: castling, pawn moves, piece moves — with optional disambiguation,
 // capture, promotion, and check/checkmate suffixes.
 const SAN_RE =

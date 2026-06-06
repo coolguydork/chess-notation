@@ -71,11 +71,6 @@ export function renderControls(
   while (i < moveTokens.length) {
     const white = moveTokens[i];
     const black = moveTokens[i + 1]; // may be undefined (last move was white's)
-    const moveNum = white.state.activeColor === "w" // after white moves it's black's turn
-      ? white.moveIndex  // derive from position in list
-      : white.moveIndex;
-
-    // Derive move number from the PGN move's position: white is always odd snapshots
     const num = Math.ceil(white.moveIndex / 2);
 
     const whiteActive = white.moveIndex === currentIndex ? " data-active=\"true\"" : "";

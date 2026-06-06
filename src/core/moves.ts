@@ -3,7 +3,6 @@ import type {
   Board,
   Square,
   Piece,
-  Color,
   PieceType,
   CastlingRights,
   EnPassantSquare,
@@ -21,10 +20,6 @@ function squareIndex(file: number, rank: number): number {
 
 function squareCoords(idx: number): { file: number; rank: number } {
   return { file: idx % 8, rank: 7 - Math.floor(idx / 8) };
-}
-
-function algebraicToIndex(sq: string): number {
-  return squareIndex(sq.charCodeAt(0) - 97, parseInt(sq[1], 10) - 1);
 }
 
 // ---------------------------------------------------------------------------
