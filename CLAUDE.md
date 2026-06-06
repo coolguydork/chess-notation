@@ -13,7 +13,7 @@ Nothing in a lower layer may import from a layer above it.
 ```
 src/
   core/     — pure chess logic, no UI, no Obsidian
-  render/   — board rendering (SVG), no Obsidian
+  render/   — board rendering (SVG) and controls (HTML), no Obsidian
   plugin/   — Obsidian glue; wires core + render into the plugin lifecycle
 tests/
   core/
@@ -23,20 +23,24 @@ tests/
 
 ### `core/` — Chess logic
 - Board state, move generation, rule enforcement
-- FEN parsing and serialization
-- PGN parsing (games, variations, annotations)
+- FEN parsing and serialization (`fen.ts`)
+- PGN parsing — moves, comments, NAGs, variations (`pgn.ts`)
+- Move application — SAN to new `BoardState` (`moves.ts`)
+- Legal move generation with check/pin filtering, castling safety, en passant (`legal.ts`)
 - No DOM, no Obsidian, no side effects
 - Every public function must be pure and unit-testable in isolation
 
 ### `render/` — Board rendering
 - Produces SVG from a board state value object (from `core/`)
 - Accepts a config object (colors, piece theme, orientation, highlighted squares)
+- `controls.ts` — `buildSnapshots()` + `renderControls()` for PGN viewer HTML
 - No Obsidian imports — must be usable in a plain browser or test environment
 - Piece assets are referenced by path/URL injected via config, never hardcoded
 
 ### `plugin/` — Obsidian integration
 - Registers the fenced code block processor (` ```chess `)
 - Owns Obsidian settings (persisted via `plugin.loadData()` / `plugin.saveData()`)
+- Settings tab: default theme, square size, coordinates toggle
 - Passes user settings down to `render/` as a config object
 - Handles lifecycle: `onload`, `onunload`
 - Must not contain chess logic or rendering logic — only wiring
@@ -52,41 +56,63 @@ the language tag `chess`:
 ```chess
 fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 orientation: white
+theme: classic
 ```
 ````
 
-The block body is YAML. Supported keys (Phase 1):
+The block body is YAML. Supported keys:
 - `fen` — FEN string (required if no `pgn`)
-- `pgn` — PGN string or PGN game text (required if no `fen`)
+- `pgn` — PGN string (required if no `fen`)
 - `orientation` — `white` | `black` (default: `white`)
+- `theme` — board color theme name (default: plugin setting); see themes below
+
+`fen` and `pgn` may be combined: `fen` sets the starting position, `pgn`
+provides the move list to navigate.
 
 Additional keys will be added in later phases without breaking existing blocks.
 
 ---
 
+## Board color themes
+
+| Name | Description |
+|---|---|
+| `classic` | Lichess brown (default) |
+| `blue` | Lichess blue-grey |
+| `green` | Chess.com green |
+| `dark` | High-contrast dark grey |
+| `walnut` | Warm walnut brown |
+| `purple` | Soft purple |
+
+Themes are defined in `src/render/config.ts` as `BOARD_THEMES`. Adding a new
+theme is a one-line entry in that record.
+
+---
+
 ## Phases
 
-### Phase 1 — Foundation (current)
+### Phase 1 — Foundation ✅
 - Parse `chess` code blocks
 - Render a static board from FEN
 - Orientation support (flip board)
 - Unit tests for FEN parsing and board rendering logic
-- Board is **purely decorative** — no click or hover behaviour
-- `render/` is a pure "board state → SVG" function with zero event handling
 
-### Phase 2 — PGN & move navigation
-- Parse PGN (moves, comments, variations)
+### Phase 2 — PGN & move navigation ✅
+- PGN parser: moves, comments, NAGs, variations
+- Move application engine: all piece types, castling, en passant, promotion
 - Step through moves with prev/next controls
-- Display move list alongside board
+- Move list alongside board; click a move to jump to it
 
-### Phase 3 — Interactivity
-- Click/drag piece moves (validates against legal moves from `core/`)
-- Copy resulting FEN/PGN back to the note (or a new block)
+### Phase 3 — Interactivity ✅
+- Click/tap piece moves (validates against legal moves from `core/`)
+- Legal move highlighting: selected square tinted, target squares dotted
+- Pointer events (works on mouse and touch)
 
-### Phase 4 — Polish
-- Piece theme selection (SVG sets)
-- Board color themes
-- Mobile / touch support
+### Phase 4 — Polish ✅
+- Six named board color themes; `theme:` key in chess blocks
+- Obsidian settings tab: default theme, square size, coordinates toggle
+- Responsive board (fills narrow viewports); mobile touch support
+- `styles.css` built and shipped alongside `main.js`
 
 ### Phase 5 — Engine integration
 - Analysis mode: send current position to an engine, display top moves and
@@ -138,8 +164,10 @@ Do not make architectural decisions that would foreclose either option.
 | YAML inside the code block | Human-readable, extensible without breaking old blocks |
 | SVG rendering (not canvas) | SVG is accessible, scalable, and inspectable in devtools |
 | Own rules engine, no chess lib | Avoids opaque dependency; rules engine is small and well-scoped |
-| Three-layer architecture | Enforces separation so phases 2-4 don't require refactoring layer boundaries |
+| Three-layer architecture | Enforces separation so phases don't require refactoring layer boundaries |
 | Piece assets default to bundled | Obsidian is local-first; offline must always work without configuration |
+| Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |
+| Themes as named presets | Easy to extend; per-block `theme:` key overrides the plugin default |
 
 ## Piece asset strategy
 
@@ -169,15 +197,21 @@ included in the esbuild bundle.
 
 ## Running locally
 
-No local Obsidian vault is configured. Development workflow:
+A test vault lives at `test-vault/`. To use it:
 
 ```bash
 npm install
-npm run build      # esbuild bundle → dist/main.js
-npm test           # vitest unit tests
+npm run build      # esbuild bundle → dist/main.js + dist/styles.css
+npm test           # vitest unit tests (165 tests across 7 suites)
 npm run dev        # watch mode
 ```
 
-To manually test inside Obsidian, copy `dist/main.js` and `manifest.json` into
-a vault's `.obsidian/plugins/obsidian-chess-plugin/` folder and enable the
-plugin in Obsidian settings.
+After building, copy `dist/main.js` and `dist/styles.css` into the vault:
+
+```bash
+cp dist/main.js dist/styles.css \
+  test-vault/.obsidian/plugins/obsidian-chess-plugin/
+```
+
+Then reload the plugin in Obsidian (disable → re-enable in Community Plugins).
+`test-vault/test.md` has examples of every block type and all six themes.
