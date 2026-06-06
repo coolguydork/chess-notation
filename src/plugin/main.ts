@@ -428,11 +428,13 @@ class ChessSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Engine mode")
-      .setDesc("How Stockfish is located. 'Auto' tries the system PATH, then common install locations.")
+      .setDesc("Auto uses the external binary on desktop (strongest) and the built-in WASM engine on mobile. " +
+               "WASM runs on all devices but is weaker and slower than a native Stockfish install. " +
+               "External binary is desktop-only (install via Homebrew, apt, etc.).")
       .addDropdown((drop) => {
-        drop.addOption("auto", "Auto (discover on PATH)");
-        drop.addOption("external", "External binary (specify path below)");
-        drop.addOption("wasm", "WASM (bundled)");
+        drop.addOption("auto", "Auto (recommended)");
+        drop.addOption("external", "External binary (desktop only)");
+        drop.addOption("wasm", "WASM — built-in, weaker");
         drop.setValue(this.plugin.settings.engineMode);
         drop.onChange(async (value) => {
           this.plugin.settings.engineMode = value as "auto" | "external" | "wasm";
