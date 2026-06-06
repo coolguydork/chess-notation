@@ -8,6 +8,7 @@ mkdirSync("dist", { recursive: true });
 copyFileSync("src/plugin/styles.css", "dist/styles.css");
 copyFileSync("node_modules/stockfish/bin/stockfish-18-lite-single.js", "dist/stockfish-18-lite-single.js");
 copyFileSync("node_modules/stockfish/bin/stockfish-18-lite-single.wasm", "dist/stockfish-18-lite-single.wasm");
+copyFileSync("src/plugin/stockfish-worker-bridge.js", "dist/stockfish-worker-bridge.js");
 
 const ctx = await esbuild.context({
   entryPoints: ["src/plugin/main.ts"],

@@ -126,6 +126,33 @@ export function runWasmAnalysis(
 }
 
 // ---------------------------------------------------------------------------
+// WASM worker creation (Electron / Node.js worker_threads)
+// ---------------------------------------------------------------------------
+
+const BRIDGE_JS = "stockfish-worker-bridge.js";
+
+/**
+ * Wraps a worker_threads Worker in the WorkerLike interface so runWasmAnalysis
+ * can drive it without knowing about the Node.js event-emitter API.
+ */
+function adaptWorkerThreads(wt: {
+  postMessage(msg: unknown): void;
+  terminate(): void;
+  on(event: "message", cb: (data: string) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+}): WorkerLike {
+  const adapter: WorkerLike = {
+    onmessage: null,
+    onerror: null,
+    postMessage: (msg) => wt.postMessage(msg),
+    terminate: () => wt.terminate(),
+  };
+  wt.on("message", (data) => adapter.onmessage?.({ data }));
+  wt.on("error", (err) => adapter.onerror?.({ message: err.message } as ErrorEvent));
+  return adapter;
+}
+
+// ---------------------------------------------------------------------------
 // Engine worker class
 // ---------------------------------------------------------------------------
 
@@ -208,8 +235,12 @@ export class EngineWorker {
       if (!this.config.wasmDir) throw new Error("wasmDir not configured");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nodePath = (globalThis as any).require("path") as typeof import("path");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { Worker: NodeWorker } = (globalThis as any).require("worker_threads") as typeof import("worker_threads");
       const jsPath = nodePath.join(this.config.wasmDir, STOCKFISH_JS);
-      const worker = new Worker(`file://${jsPath}`) as unknown as WorkerLike;
+      const bridgePath = nodePath.join(this.config.wasmDir, BRIDGE_JS);
+      const wt = new NodeWorker(bridgePath, { workerData: { jsPath, wasmDir: this.config.wasmDir } });
+      const worker = adaptWorkerThreads(wt);
       const { depth, multiPV } = this.config;
       const commands = buildUciCommands(state, history, depth, multiPV);
       return runWasmAnalysis(worker, commands);
