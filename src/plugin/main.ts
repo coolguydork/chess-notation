@@ -10,15 +10,20 @@ interface ChessBlockParams {
   orientation?: "white" | "black";
 }
 
-function resolvePieceUrl(piece: Piece, source: PieceSource, pluginDir: string): string {
+function resolvePieceUrl(
+  piece: Piece,
+  source: PieceSource,
+  getResourcePath: (path: string) => string,
+  pluginDir: string
+): string {
   const name = `${piece.color}${piece.type.toUpperCase()}.svg`;
   switch (source.type) {
     case "bundled":
-      return `${pluginDir}/pieces/${name}`;
+      return getResourcePath(`${pluginDir}/pieces/${name}`);
     case "cdn":
       return `${source.baseUrl}/${name}`;
     case "local":
-      return `app://obsidian.md/${source.vaultPath}/${name}`;
+      return getResourcePath(`${source.vaultPath}/${name}`);
   }
 }
 
@@ -59,16 +64,17 @@ export default class ChessPlugin extends Plugin {
 
           const state = parseFEN(params.fen);
 
-          const pluginDir = this.app.vault.adapter
-            ? `.obsidian/plugins/${this.manifest.id}`
-            : "";
+          const pluginDir = this.manifest.dir ?? `.obsidian/plugins/${this.manifest.id}`;
+          const getResourcePath = (path: string) =>
+            this.app.vault.adapter.getResourcePath(path);
 
           const pieceSource = DEFAULT_BOARD_CONFIG.pieceSource;
 
           const config: BoardConfig = {
             ...DEFAULT_BOARD_CONFIG,
             orientation: params.orientation ?? DEFAULT_BOARD_CONFIG.orientation,
-            resolvePieceUrl: (piece) => resolvePieceUrl(piece, pieceSource, pluginDir),
+            resolvePieceUrl: (piece) =>
+              resolvePieceUrl(piece, pieceSource, getResourcePath, pluginDir),
           };
 
           const svg = renderBoard(state, config);
