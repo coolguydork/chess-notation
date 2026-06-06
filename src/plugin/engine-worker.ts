@@ -241,6 +241,15 @@ export class EngineWorker {
       const outputLines: string[] = [];
       let readyOkSeen = false;
 
+      // Wrap ccall so every command is deferred via setImmediate.
+      // This matches what the package's index.js does and prevents nested ccall
+      // calls from breaking asyncify's state machine.
+      const send = (cmd: string): void => {
+        setImmediate(() => {
+          engine.ccall("command", null, ["string"], [cmd], { async: /^go\b/.test(cmd) });
+        });
+      };
+
       return new Promise<AnalysisResult>((resolve, reject) => {
         engine.listener = (line: string): void => {
           const trimmed = line.trim();
@@ -249,10 +258,8 @@ export class EngineWorker {
 
           if (!readyOkSeen && trimmed === "readyok") {
             readyOkSeen = true;
-            engine.ccall("command", null, ["string"], [commands[3]], { async: false }); // position
-            // go uses asyncify — yields to event loop during search
-            (engine.ccall("command", null, ["string"], [commands[4]], { async: true }) as Promise<void>)
-              .catch(reject);
+            send(commands[3]); // position
+            send(commands[4]); // go
             return;
           }
 
@@ -261,13 +268,11 @@ export class EngineWorker {
           }
         };
 
-        try {
-          engine.ccall("command", null, ["string"], [commands[0]], { async: false }); // uci
-          engine.ccall("command", null, ["string"], [commands[1]], { async: false }); // setoption
-          engine.ccall("command", null, ["string"], [commands[2]], { async: false }); // isready
-        } catch (e) {
-          reject(e as Error);
-        }
+        engine.onAbort = (err: unknown): void => reject(new Error(String(err)));
+
+        send(commands[0]); // uci
+        send(commands[1]); // setoption
+        send(commands[2]); // isready
       });
     }
 
