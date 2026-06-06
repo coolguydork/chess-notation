@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-chess-plugin",
+  "name": "Chess",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Render and interact with chess boards inside your notes using FEN or PGN notation.",
+  "author": "Peter Ong",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
