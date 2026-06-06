@@ -18,6 +18,13 @@ export interface EngineArrow {
   color: string; // CSS color string
 }
 
+export interface UserArrow {
+  from: number;   // board index (0–63)
+  to: number;     // board index (0–63)
+  color: string;  // CSS color string
+  label?: string; // optional annotation shown near the arrowhead
+}
+
 export interface BoardConfig {
   orientation: "white" | "black";
   colors: BoardColors;
@@ -34,6 +41,8 @@ export interface BoardConfig {
   legalTargets?: ReadonlySet<number>;
   // Engine move arrows drawn over the board (Phase 5).
   engineArrows?: EngineArrow[];
+  // User-drawn arrows with optional text labels.
+  userArrows?: UserArrow[];
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import {
   BoardConfig,
   PieceSource,
   EngineArrow,
+  UserArrow,
   getBoardColors,
   themeNames,
 } from "../render/config";
@@ -143,6 +144,8 @@ function squareFromEvent(
   return (7 - rank) * 8 + file;
 }
 
+const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
+
 function mountInteractiveBoard(
   wrapper: HTMLElement,
   initialState: BoardState,
@@ -151,24 +154,99 @@ function mountInteractiveBoard(
   let state = initialState;
   let selected: number | null = null;
   let legalTargets = new Set<number>();
+  let userArrows: UserArrow[] = [];
+  let rightDragStart: number | null = null;
 
   function render(): void {
     const config: BoardConfig = {
       ...baseConfig,
       selectedSquare: selected ?? undefined,
       legalTargets: legalTargets.size > 0 ? legalTargets : undefined,
+      userArrows: userArrows.length > 0 ? userArrows : undefined,
     };
     wrapper.innerHTML = renderBoard(state, config);
   }
 
-  // Use pointer events so the same handler works for mouse and touch
+  // Show a floating comment input near the midpoint of the most-recently drawn arrow.
+  // Resolves with the entered label (empty string = no label) or null if cancelled.
+  function promptArrowLabel(fromIdx: number, toIdx: number): Promise<string | null> {
+    return new Promise((resolve) => {
+      const svg = wrapper.querySelector("svg.chess-board-svg");
+      if (!svg) { resolve(null); return; }
+      const rect = svg.getBoundingClientRect();
+      const sq = baseConfig.squareSize;
+      const scale = rect.width / (sq * 8);
+
+      function idxToXY(idx: number): { x: number; y: number } {
+        const rank = 7 - Math.floor(idx / 8);
+        const file = idx % 8;
+        const col = baseConfig.orientation === "white" ? file : 7 - file;
+        const row = baseConfig.orientation === "white" ? 7 - rank : rank;
+        return {
+          x: rect.left + (col * sq + sq / 2) * scale,
+          y: rect.top  + (row * sq + sq / 2) * scale,
+        };
+      }
+
+      const p1 = idxToXY(fromIdx);
+      const p2 = idxToXY(toIdx);
+      const mx = (p1.x + p2.x) / 2;
+      const my = (p1.y + p2.y) / 2;
+
+      const overlay = document.createElement("div");
+      overlay.className = "chess-arrow-comment-overlay";
+      overlay.style.cssText = `position:fixed;left:${mx}px;top:${my}px;transform:translate(-50%,-50%);
+        background:#1e1e2e;border:1px solid rgba(220,80,20,0.7);border-radius:6px;
+        padding:6px 8px;display:flex;gap:6px;align-items:center;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.5);`;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Add comment… (Enter to save, Esc to skip)";
+      input.style.cssText = `background:transparent;border:none;outline:none;color:#cdd6f4;
+        font-size:13px;width:240px;`;
+
+      const save = document.createElement("button");
+      save.textContent = "✓";
+      save.style.cssText = `background:rgba(220,80,20,0.8);border:none;border-radius:4px;
+        color:#fff;padding:2px 7px;cursor:pointer;font-size:13px;`;
+
+      overlay.appendChild(input);
+      overlay.appendChild(save);
+      document.body.appendChild(overlay);
+      input.focus();
+
+      function done(label: string | null) {
+        overlay.remove();
+        resolve(label);
+      }
+
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") { e.preventDefault(); done(input.value.trim() || null); }
+        if (e.key === "Escape") { e.preventDefault(); done(null); }
+      });
+      save.addEventListener("click", () => done(input.value.trim() || null));
+
+      // Click outside to dismiss without a label
+      setTimeout(() => {
+        function outside(e: MouseEvent) {
+          if (!overlay.contains(e.target as Node)) {
+            document.removeEventListener("mousedown", outside);
+            done(null);
+          }
+        }
+        document.addEventListener("mousedown", outside);
+      }, 0);
+    });
+  }
+
+  // Left-click move handling
   wrapper.addEventListener("pointerup", (e) => {
+    if (e.button !== 0) return;
     const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
     if (idx === null) return;
 
     if (selected !== null && legalTargets.has(idx)) {
       const moves = getSquareLegalMoves(state, selected);
-      // Prefer queen promotion when multiple promotions share the same destination
       const move =
         moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
         moves.find(m => m.to === idx);
@@ -187,6 +265,47 @@ function mountInteractiveBoard(
     }
     render();
   });
+
+  // Right-drag arrow drawing
+  wrapper.addEventListener("pointerdown", (e) => {
+    if (e.button !== 2) return;
+    rightDragStart = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
+  });
+
+  wrapper.addEventListener("pointerup", async (e) => {
+    if (e.button !== 2) return;
+    const end = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
+    const start = rightDragStart;
+    rightDragStart = null;
+    if (start === null || end === null) return;
+
+    if (start === end) {
+      // Same square: remove any arrows originating from this square
+      userArrows = userArrows.filter(a => a.from !== start);
+      render();
+      return;
+    }
+
+    // Toggle: if this exact arrow already exists, remove it; otherwise add it
+    const existing = userArrows.findIndex(a => a.from === start && a.to === end);
+    if (existing !== -1) {
+      userArrows.splice(existing, 1);
+      render();
+      return;
+    }
+
+    // Draw the arrow first, then ask for an optional comment
+    userArrows.push({ from: start, to: end, color: USER_ARROW_COLOR });
+    render();
+
+    const label = await promptArrowLabel(start, end);
+    if (label) {
+      userArrows[userArrows.length - 1].label = label;
+      render();
+    }
+  });
+
+  wrapper.addEventListener("contextmenu", (e) => e.preventDefault());
 
   render();
 }

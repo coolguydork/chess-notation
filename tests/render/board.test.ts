@@ -123,6 +123,72 @@ describe("renderBoard", () => {
   });
 });
 
+describe("user arrows", () => {
+  it("renders no user arrows when userArrows is absent", () => {
+    const svg = renderBoard(parseFEN(STARTING_FEN), testConfig);
+    // No extra lines beyond potential engine arrows (which are also absent here)
+    expect(svg).not.toContain("data-user-arrow");
+  });
+
+  it("renders a <line> for each user arrow", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      userArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "rgba(255,100,0,0.8)" },
+        { from: uciSquareToIndex("d1"), to: uciSquareToIndex("h5"), color: "rgba(255,100,0,0.8)" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect((svg.match(/data-user-arrow/g) ?? []).length).toBe(2);
+  });
+
+  it("renders no <text> label for an unlabeled user arrow", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      userArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "orange" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect(svg).not.toContain("chess-arrow-label");
+  });
+
+  it("renders a <text> with the label for a labeled user arrow", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      userArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "orange", label: "Key idea!" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect(svg).toContain("chess-arrow-label");
+    expect(svg).toContain("Key idea!");
+  });
+
+  it("renders labels for only the arrows that have them", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      userArrows: [
+        { from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "orange", label: "Push!" },
+        { from: uciSquareToIndex("d2"), to: uciSquareToIndex("d4"), color: "orange" },
+      ],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect((svg.match(/chess-arrow-label/g) ?? []).length).toBe(1);
+    expect(svg).toContain("Push!");
+  });
+
+  it("user arrows and engine arrows can coexist", () => {
+    const config: BoardConfig = {
+      ...testConfig,
+      engineArrows: [{ from: uciSquareToIndex("e2"), to: uciSquareToIndex("e4"), color: "green" }],
+      userArrows:   [{ from: uciSquareToIndex("d2"), to: uciSquareToIndex("d4"), color: "orange" }],
+    };
+    const svg = renderBoard(parseFEN(STARTING_FEN), config);
+    expect((svg.match(/<line /g) ?? []).length).toBe(2);
+  });
+});
+
 describe("uciSquareToIndex", () => {
   it("converts a1 to index 56", () => expect(uciSquareToIndex("a1")).toBe(56));
   it("converts h1 to index 63", () => expect(uciSquareToIndex("h1")).toBe(63));

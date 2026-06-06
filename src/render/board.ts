@@ -1,5 +1,5 @@
 import type { BoardState, Square } from "../core/types";
-import type { BoardConfig, EngineArrow } from "./config";
+import type { BoardConfig, EngineArrow, UserArrow } from "./config";
 
 // Maps board index → { col, row } in SVG space (0,0 = top-left).
 // When orientation is "white": a8=index 0 → col 0, row 0.
@@ -171,6 +171,67 @@ function renderArrows(arrows: EngineArrow[], config: BoardConfig): string {
   return parts.join("\n  ");
 }
 
+function renderUserArrows(arrows: UserArrow[], config: BoardConfig): string {
+  if (!arrows.length) return "";
+  const { squareSize, orientation } = config;
+  const parts: string[] = [];
+
+  const colors = [...new Set(arrows.map(a => a.color))];
+  const defs = colors.map(color => {
+    const id = `user-arrowhead-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
+    return `<marker id="${id}" markerWidth="4" markerHeight="4" refX="2.5" refY="2" orient="auto">` +
+      `<path d="M0,0 L0,4 L4,2 z" fill="${color}"/></marker>`;
+  }).join("");
+  parts.push(`<defs>${defs}</defs>`);
+
+  const fontSize = Math.round(squareSize * 0.22);
+  const strokeW = Math.round(squareSize * 0.12);
+
+  for (const arrow of arrows) {
+    const from = indexToColRow(arrow.from, orientation);
+    const to   = indexToColRow(arrow.to,   orientation);
+
+    const x1 = from.col * squareSize + squareSize / 2;
+    const y1 = from.row * squareSize + squareSize / 2;
+    const x2 = to.col   * squareSize + squareSize / 2;
+    const y2 = to.row   * squareSize + squareSize / 2;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const shorten = squareSize * 0.3;
+    const ex = x2 - (dx / len) * shorten;
+    const ey = y2 - (dy / len) * shorten;
+
+    const colorId = `user-arrowhead-${arrow.color.replace(/[^a-zA-Z0-9]/g, "")}`;
+    parts.push(
+      `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"` +
+      ` stroke="${arrow.color}" stroke-width="${strokeW}" stroke-linecap="round"` +
+      ` marker-end="url(#${colorId})" opacity="0.82" data-user-arrow="1"/>`
+    );
+
+    if (arrow.label) {
+      // Place label at the midpoint of the arrow, offset slightly perpendicular
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      // Perpendicular unit vector (rotate 90°)
+      const px = -dy / len;
+      const py =  dx / len;
+      const offset = squareSize * 0.28;
+      const tx = mx + px * offset;
+      const ty = my + py * offset;
+      parts.push(
+        `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" font-size="${fontSize}"` +
+        ` fill="${arrow.color}" font-family="sans-serif" font-weight="bold"` +
+        ` text-anchor="middle" dominant-baseline="middle"` +
+        ` class="chess-arrow-label" opacity="0.92">${arrow.label}</text>`
+      );
+    }
+  }
+
+  return parts.join("\n  ");
+}
+
 export function renderBoard(state: BoardState, config: BoardConfig): string {
   const size = config.squareSize * 8;
 
@@ -179,6 +240,7 @@ export function renderBoard(state: BoardState, config: BoardConfig): string {
   const pieces = renderPieces(state.board, config);
   const highlights = renderHighlights(config);
   const arrows = renderArrows(config.engineArrows ?? [], config);
+  const userArrows = renderUserArrows(config.userArrows ?? [], config);
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="chess-board-svg">`,
@@ -187,6 +249,7 @@ export function renderBoard(state: BoardState, config: BoardConfig): string {
     coordinates ? `  <!-- coordinates -->\n  ${coordinates}` : "",
     highlights ? `  <!-- highlights -->\n  ${highlights}` : "",
     arrows ? `  <!-- engine arrows -->\n  ${arrows}` : "",
+    userArrows ? `  <!-- user arrows -->\n  ${userArrows}` : "",
     `  <!-- pieces -->`,
     `  ${pieces}`,
     `</svg>`,
