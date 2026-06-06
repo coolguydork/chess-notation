@@ -174,6 +174,8 @@ export class EngineWorker {
   private config: Required<EngineWorkerConfig>;
   private proc: ChildProcess | null = null;
   private binaryPath: string | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private wasmEngine: any = null;
 
   constructor(config: EngineWorkerConfig) {
     this.mode = config.mode;
@@ -207,39 +209,50 @@ export class EngineWorker {
     return path !== null;
   }
 
+  /** Initialise the WASM engine once and cache it on the instance. */
+  private async getWasmEngine(): Promise<unknown> {
+    if (this.wasmEngine) return this.wasmEngine;
+    if (!this.config.wasmDir) throw new Error("wasmDir not configured");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const req = (globalThis as any).require as NodeRequire;
+    const nodePath = req("path") as typeof import("path");
+    const wasmDir = this.config.wasmDir;
+    const wasmPath = nodePath.join(wasmDir, "stockfish-18-lite-single.wasm");
+
+    // The stockfish JS exports an outer factory; calling it returns the inner
+    // Emscripten factory. Calling the inner factory with a config object extends
+    // that object in-place with the full WASM module (ccall, _isReady, etc).
+    const outerFactory = req(nodePath.join(wasmDir, STOCKFISH_JS)) as () => (cfg: object) => Promise<void>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const engine: any = {
+      // The Emscripten module internally requests "stockfish.wasm" (hardcoded).
+      // Redirect any .wasm request to the actual versioned file alongside main.js.
+      locateFile: (file: string) =>
+        file.includes(".wasm") && !file.includes(".wasm.map")
+          ? wasmPath
+          : nodePath.join(wasmDir, file),
+    };
+    await outerFactory()(engine);
+
+    // Poll until Stockfish's UCI loop has started (mirrors what the package's index.js does).
+    await new Promise<void>((resolve) => {
+      const check = (): void => {
+        if (!engine._isReady || engine._isReady()) return resolve();
+        setTimeout(check, 10);
+      };
+      check();
+    });
+
+    this.wasmEngine = engine;
+    return engine;
+  }
+
   /** Analyse a position. Resolves with the best lines found at the configured depth. */
   async analyse(state: BoardState, history: string[]): Promise<AnalysisResult> {
     if (this.useWasm) {
-      if (!this.config.wasmDir) throw new Error("wasmDir not configured");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req = (globalThis as any).require as NodeRequire;
-      const wasmDir = this.config.wasmDir;
-      const nodePath = req("path") as typeof import("path");
-
-      // The stockfish JS exports an outer factory; calling it returns the inner
-      // Emscripten factory. Calling the inner factory with a config object extends
-      // that object in-place with the full WASM module (including ccall).
-      const outerFactory = req(nodePath.join(wasmDir, STOCKFISH_JS)) as () => (cfg: object) => Promise<void>;
-      const wasmPath = nodePath.join(wasmDir, "stockfish-18-lite-single.wasm");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const engine: any = {
-        // The Emscripten module internally requests "stockfish.wasm" (hardcoded).
-        // Redirect any .wasm request to the actual versioned file alongside main.js.
-        locateFile: (file: string) =>
-          file.includes(".wasm") && !file.includes(".wasm.map")
-            ? wasmPath
-            : nodePath.join(wasmDir, file),
-      };
-      await outerFactory()(engine);
-
-      // Poll until Stockfish's UCI loop has started (mirrors what the package's index.js does).
-      await new Promise<void>((resolve) => {
-        const check = (): void => {
-          if (!engine._isReady || engine._isReady()) return resolve();
-          setTimeout(check, 10);
-        };
-        check();
-      });
+      const engine: any = await this.getWasmEngine();
 
       const { depth, multiPV } = this.config;
       const commands = buildUciCommands(state, history, depth, multiPV);
@@ -275,9 +288,10 @@ export class EngineWorker {
 
         engine.onAbort = (err: unknown): void => reject(new Error(String(err)));
 
-        send(commands[0]); // uci
-        send(commands[1]); // setoption
-        send(commands[2]); // isready
+        // On re-analysis, reset engine state before sending a new position.
+        send("ucinewgame");
+        send(commands[1]); // setoption MultiPV (in case depth/multipv changed)
+        send("isready");   // wait for readyok before position + go
       });
     }
 
@@ -341,5 +355,9 @@ export class EngineWorker {
   dispose(): void {
     this.proc?.kill();
     this.proc = null;
+    if (this.wasmEngine) {
+      try { this.wasmEngine.ccall("command", null, ["string"], ["quit"], { async: false }); } catch { /* ignore */ }
+      this.wasmEngine = null;
+    }
   }
 }
