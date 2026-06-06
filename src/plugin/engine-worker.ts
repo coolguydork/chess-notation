@@ -1,3 +1,4 @@
+import { Platform } from "obsidian";
 import type { BoardState } from "../core/types";
 import type { AnalysisResult, EngineMove, EngineMode } from "../core/engine";
 import { positionToUci, parseInfoLine, parseBestMove } from "../core/engine";
@@ -186,9 +187,13 @@ export class EngineWorker {
     };
   }
 
+  private get useWasm(): boolean {
+    return this.config.mode === "wasm" || (this.config.mode === "auto" && Platform.isMobile);
+  }
+
   /** Check whether a usable engine is reachable. */
   async probe(): Promise<boolean> {
-    if (this.config.mode === "wasm") {
+    if (this.useWasm) {
       if (!this.config.wasmDir) return false;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nodePath = (globalThis as any).require("path") as typeof import("path");
@@ -204,7 +209,7 @@ export class EngineWorker {
 
   /** Analyse a position. Resolves with the best lines found at the configured depth. */
   async analyse(state: BoardState, history: string[]): Promise<AnalysisResult> {
-    if (this.config.mode === "wasm") {
+    if (this.useWasm) {
       if (!this.config.wasmDir) throw new Error("wasmDir not configured");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const req = (globalThis as any).require as NodeRequire;
