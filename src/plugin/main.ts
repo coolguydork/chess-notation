@@ -330,7 +330,7 @@ function mountAnalysisPanel(
   getWorker: () => EngineWorker
 ): void {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
-  const btn   = panel.createEl("button", { text: "Analyse", cls: "chess-analyse-btn" });
+  const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyse-btn" });
   const output = panel.createDiv({ cls: "chess-analysis-output" });
 
   btn.addEventListener("click", async () => {
@@ -359,7 +359,7 @@ function mountAnalysisPanel(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.createEl("p", { text: `Engine error: ${msg}`, cls: "chess-engine-error" });
-      btn.textContent = "Analyse";
+      btn.textContent = "Analyze";
     } finally {
       btn.disabled = false;
     }
