@@ -150,7 +150,7 @@ function mountInteractiveBoard(
   wrapper: HTMLElement,
   initialState: BoardState,
   baseConfig: BoardConfig
-): void {
+): () => BoardState {
   let state = initialState;
   let selected: number | null = null;
   let legalTargets = new Set<number>();
@@ -308,6 +308,7 @@ function mountInteractiveBoard(
   wrapper.addEventListener("contextmenu", (e) => e.preventDefault());
 
   render();
+  return () => state;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +326,7 @@ function uciToArrow(uciMove: string, color: string): EngineArrow {
 function mountAnalysisPanel(
   container: HTMLElement,
   boardWrapper: HTMLElement,
-  state: BoardState,
+  getState: () => BoardState,
   baseConfig: BoardConfig,
   getWorker: () => EngineWorker
 ): void {
@@ -340,6 +341,7 @@ function mountAnalysisPanel(
 
     try {
       const worker = getWorker();
+      const state = getState();
       const result = await worker.analyse(state, []);
 
       // Draw arrows for each top move
@@ -543,10 +545,10 @@ export default class ChessPlugin extends Plugin {
             const state = parseFEN(params.fen);
             const container = el.createDiv({ cls: "chess-analysis-container" });
             const boardWrapper = container.createDiv({ cls: "chess-board" });
-            mountInteractiveBoard(boardWrapper, state, baseConfig);
+            const getState = mountInteractiveBoard(boardWrapper, state, baseConfig);
 
             if (params.analysis) {
-              mountAnalysisPanel(container, boardWrapper, state, baseConfig, this.getEngineWorker.bind(this));
+              mountAnalysisPanel(container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this));
             }
             return;
           }
