@@ -1,5 +1,5 @@
 {
-  "name": "obsidian-chess-plugin",
+  "name": "chess-notation",
   "version": "0.1.0",
   "private": true,
   "description": "Render and interact with chess boards inside Obsidian notes",

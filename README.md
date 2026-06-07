@@ -52,7 +52,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 ### Manual installation
 
 1. Download `main.js` and `styles.css` from the [latest release](../../releases/latest)
-2. Create the folder `.obsidian/plugins/obsidian-chess-plugin/` inside your vault
+2. Create the folder `.obsidian/plugins/chess-notation/` inside your vault
 3. Copy both files into that folder
 4. In Obsidian: **Settings → Community plugins → Installed plugins** → enable **Chess**
 
@@ -364,7 +364,7 @@ See [Plugin settings](#plugin-settings) above.
 
 ```bash
 git clone <this repo>
-cd obsidian-chess-plugin
+cd chess-notation
 npm install
 ```
 
@@ -381,7 +381,7 @@ npm install
 ```bash
 npm run build
 cp dist/main.js dist/styles.css \
-  test-vault/.obsidian/plugins/obsidian-chess-plugin/
+  test-vault/.obsidian/plugins/chess-notation/
 ```
 
 Then in Obsidian: **Settings → Community Plugins** → disable then re-enable **Chess**.

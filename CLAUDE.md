@@ -1,4 +1,4 @@
-# obsidian-chess-plugin
+# chess-notation
 
 An Obsidian plugin that renders interactive chess boards and understands chess
 notation inside markdown notes.
@@ -210,7 +210,7 @@ After building, copy `dist/main.js` and `dist/styles.css` into the vault:
 
 ```bash
 cp dist/main.js dist/styles.css \
-  test-vault/.obsidian/plugins/obsidian-chess-plugin/
+  test-vault/.obsidian/plugins/chess-notation/
 ```
 
 Then reload the plugin in Obsidian (disable → re-enable in Community Plugins).
