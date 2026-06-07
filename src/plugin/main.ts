@@ -227,7 +227,7 @@ function mountAnalysisPanel(
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
-    btn.textContent = "Analysing…";
+    btn.textContent = "Analyzing…";
     output.empty();
 
     try {

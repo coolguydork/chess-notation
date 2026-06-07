@@ -1,6 +1,6 @@
 # Chess for Obsidian
 
-Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, click pieces to make moves, analyse positions with Stockfish, and choose from six board themes — all without leaving Obsidian.
+Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, click pieces to make moves, analyze positions with Stockfish, and choose from six board themes — all without leaving Obsidian.
 
 ---
 
@@ -12,7 +12,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 | **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons or by clicking any move token in the move list. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
-| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyse button. Coloured arrows show the top moves; a score list shows evaluations and principal variations. |
+| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyze button. Coloured arrows show the top moves; a score list shows evaluations and principal variations. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
 | **Board orientation** | Flip any board to Black's perspective with `orientation: black`. |
 | **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
@@ -82,7 +82,7 @@ pgn: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 ```
 ````
 
-**Analyse a position with Stockfish:**
+**Analyze a position with Stockfish:**
 
 ````markdown
 ```chess
@@ -169,7 +169,7 @@ theme: walnut
 
 ### Combined FEN + PGN
 
-You can provide both `fen` and `pgn`. The FEN sets the starting position; the PGN provides the move list to navigate from there. This is useful for analysing a game fragment that doesn't begin from the standard starting position.
+You can provide both `fen` and `pgn`. The FEN sets the starting position; the PGN provides the move list to navigate from there. This is useful for analyzing a game fragment that doesn't begin from the standard starting position.
 
 ````markdown
 ```chess
@@ -180,7 +180,7 @@ pgn: 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 
 ### Analysis blocks
 
-Add `analysis: true` to any FEN block to attach an **Analyse** button below the board.
+Add `analysis: true` to any FEN block to attach an **Analyze** button below the board.
 
 ````markdown
 ```chess
@@ -189,7 +189,7 @@ analysis: true
 ```
 ````
 
-When you click **Analyse**:
+When you click **Analyze**:
 
 1. The plugin spawns Stockfish and sends the position via the UCI protocol
 2. The engine searches to the configured depth (default: 18)
@@ -311,7 +311,7 @@ Open **Settings → Chess → Engine** to configure:
 
 ### Reading the analysis output
 
-After clicking **Analyse**, you'll see:
+After clicking **Analyze**, you'll see:
 
 ```
 +0.46  e2e4 e7e6 d2d4 d7d5 b1c3
@@ -322,7 +322,7 @@ After clicking **Analyse**, you'll see:
 - **Score** — centipawn evaluation from the perspective of the side to move. `+0.46` means White is 0.46 pawns ahead. `M3` means forced checkmate in 3 moves; `M-2` means the side to move is being mated in 2.
 - **PV** — the principal variation: the sequence of best moves for both sides at the current depth, in UCI notation (`e2e4` = pawn from e2 to e4).
 
-Arrow colors on the board correspond to ranks 1, 2, and 3 (green, blue, orange). Click **Re-analyse** at any time to run a fresh search.
+Arrow colors on the board correspond to ranks 1, 2, and 3 (green, blue, orange). Click **Re-analyze** at any time to run a fresh search.
 
 ---
 
