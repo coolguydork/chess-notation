@@ -169,6 +169,13 @@ function mountInteractiveBoard(
   let userArrows: UserArrow[] = [];
   let rightDragStart: number | null = null;
 
+  // Drag state
+  let dragSource: number | null = null;
+  let dragGhost: HTMLImageElement | null = null;
+  let dragMoved = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+
   function render(): void {
     const config: BoardConfig = {
       ...baseConfig,
@@ -177,6 +184,13 @@ function mountInteractiveBoard(
       userArrows: userArrows.length > 0 ? userArrows : undefined,
     };
     wrapper.innerHTML = renderBoard(state, config);
+  }
+
+  function removeGhost(): void {
+    if (dragGhost) {
+      dragGhost.remove();
+      dragGhost = null;
+    }
   }
 
   // Show a floating comment input near the midpoint of the most-recently drawn arrow.
@@ -251,12 +265,85 @@ function mountInteractiveBoard(
     });
   }
 
-  // Left-click move handling
-  wrapper.addEventListener("pointerup", (e) => {
+  // Left pointer down — begin drag if clicking a friendly piece
+  wrapper.addEventListener("pointerdown", (e: PointerEvent) => {
     if (e.button !== 0) return;
     const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
     if (idx === null) return;
+    const piece = state.board[idx];
+    if (!piece || piece.color !== state.activeColor) return;
 
+    dragSource = idx;
+    dragMoved = false;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+
+    // Show legal move dots immediately
+    selected = idx;
+    legalTargets = new Set(getSquareLegalMoves(state, idx).map(m => m.to));
+    render();
+
+    // Create ghost image
+    const svg = wrapper.querySelector("svg.chess-board-svg");
+    const rect = svg ? svg.getBoundingClientRect() : wrapper.getBoundingClientRect();
+    const scale = rect.width / (baseConfig.squareSize * 8);
+    const ghostSize = Math.round(baseConfig.squareSize * scale);
+
+    const ghost = document.createElement("img");
+    ghost.src = baseConfig.resolvePieceUrl(piece);
+    ghost.style.cssText = `position:fixed;width:${ghostSize}px;height:${ghostSize}px;` +
+      `pointer-events:none;z-index:10000;opacity:0.85;` +
+      `left:${e.clientX - ghostSize / 2}px;top:${e.clientY - ghostSize / 2}px;`;
+    document.body.appendChild(ghost);
+    dragGhost = ghost;
+
+    wrapper.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  // Pointer move — update ghost position
+  wrapper.addEventListener("pointermove", (e: PointerEvent) => {
+    if (dragSource === null || !dragGhost) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    if (!dragMoved && Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
+    const ghostSize = parseInt(dragGhost.style.width, 10);
+    dragGhost.style.left = `${e.clientX - ghostSize / 2}px`;
+    dragGhost.style.top  = `${e.clientY - ghostSize / 2}px`;
+  });
+
+  // Left-click / drag-drop move handling
+  wrapper.addEventListener("pointerup", (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
+
+    if (dragSource !== null) {
+      removeGhost();
+      const src = dragSource;
+      dragSource = null;
+
+      if (dragMoved) {
+        // Drag release — attempt move to destination
+        if (idx !== null && legalTargets.has(idx)) {
+          const moves = getSquareLegalMoves(state, src);
+          const move =
+            moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
+            moves.find(m => m.to === idx);
+          if (move) state = applyMove(state, move.san);
+        }
+        selected = null;
+        legalTargets = new Set();
+        render();
+        return;
+      }
+
+      // Tiny movement — treat as a click; legal dots already showing, wait for next click
+      // (fall through: state already rendered with selection on pointerdown)
+      return;
+    }
+
+    // No drag in progress — handle second click of click-to-move
+    if (idx === null) return;
     if (selected !== null && legalTargets.has(idx)) {
       const moves = getSquareLegalMoves(state, selected);
       const move =
