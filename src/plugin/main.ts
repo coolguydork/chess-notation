@@ -554,6 +554,19 @@ function mountPgnViewer(
     if (current.next) { current = current.next; onNavigate(current); }
   });
 
+  // Hover preview: show the hovered move's position on the board temporarily.
+  moveListEl.addEventListener("mouseover", (e: MouseEvent) => {
+    const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
+    if (!token) return;
+    const id = parseInt(token.dataset.nodeId ?? "-1", 10);
+    const found = findNodeById(root, id);
+    if (found && found !== current) boardInteraction.setState(found.state);
+  });
+
+  moveListEl.addEventListener("mouseleave", () => {
+    boardInteraction.setState(current.state);
+  });
+
   // Delegated listener on the stable container — survives innerHTML swaps.
   moveListEl.addEventListener("click", (e: MouseEvent) => {
     const target = e.target as HTMLElement;
