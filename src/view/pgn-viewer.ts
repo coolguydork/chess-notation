@@ -4,6 +4,7 @@ import { mountInteractiveBoard } from "./interactive-board";
 import type { InteractiveBoardHandle } from "./interactive-board";
 import type { MoveNode, BoardState } from "../core/types";
 import type { BoardConfig, EngineArrow } from "../render/config";
+import type { PvMove } from "../core/engine";
 
 export { nodeToPath, pathToNode };
 
@@ -277,5 +278,19 @@ export class PgnViewer {
 
   getCurrentState(): BoardState {
     return this.state.current.state;
+  }
+
+  getCurrentNode(): MoveNode {
+    return this.state.current;
+  }
+
+  /** Graft a decoded engine PV line as variations starting from `fromNode`, navigate to the last grafted node. */
+  graftLine(fromNode: MoveNode, pvMoves: PvMove[]): void {
+    let node = fromNode;
+    for (const m of pvMoves) {
+      node = attachMove(node, m.san, m.state, m.from, m.to);
+    }
+    this.goTo(node);
+    this.emit("move");
   }
 }

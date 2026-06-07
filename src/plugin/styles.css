@@ -266,18 +266,57 @@
   cursor: default;
 }
 
+.chess-eval-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.chess-eval-bar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--text-normal);
+  transition: width 0.3s ease;
+  border-radius: 3px 0 0 3px;
+}
+
+.chess-eval-bar-label {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-monospace);
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 0 6px;
+  color: var(--text-accent);
+  mix-blend-mode: difference;
+  white-space: nowrap;
+}
+
 .chess-analysis-output {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   font-family: var(--font-monospace);
   font-size: 0.85em;
 }
 
 .chess-analysis-row {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   align-items: baseline;
+}
+
+.chess-analysis-rank {
+  color: var(--text-faint);
+  min-width: 1.5em;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .chess-analysis-score {
@@ -285,10 +324,56 @@
   text-align: right;
   font-weight: 600;
   color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.chess-analysis-score--mate {
+  color: var(--color-orange, #e8a060);
 }
 
 .chess-analysis-pv {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.chess-pv-move {
+  background: none;
+  border: none;
+  padding: 0 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
   color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.chess-pv-move:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.chess-pv-move--best {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.chess-pv-move--best:hover {
+  background: var(--background-modifier-hover);
+}
+
+.chess-pv-move:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.chess-analysis-depth {
+  color: var(--text-faint);
+  font-size: 0.8em;
+  flex-shrink: 0;
 }
 
 .chess-engine-error {

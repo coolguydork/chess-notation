@@ -14,8 +14,8 @@ import {
   getBoardColors,
   themeNames,
 } from "../render/config";
-import { scoreToString } from "../core/engine";
-import type { UciOptionDef } from "../core/engine";
+import { scoreToString, uciPvToSan } from "../core/engine";
+import type { UciOptionDef, PvMove } from "../core/engine";
 import { EngineWorker } from "./engine-worker";
 import type { Piece, BoardState, MoveNode, PgnGame } from "../core/types";
 
@@ -212,7 +212,8 @@ function mountAnalysisPanel(
   getState: () => BoardState,
   baseConfig: BoardConfig,
   getWorker: () => EngineWorker,
-  onArrows?: (arrows: EngineArrow[]) => void
+  onArrows?: (arrows: EngineArrow[]) => void,
+  onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void
 ): { reset: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
   const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyse-btn" });
@@ -243,11 +244,42 @@ function mountAnalysisPanel(
       }
       onArrows?.(arrows);
 
+      // Eval bar
+      const bestScore = result.moves[0]?.score;
+      if (bestScore) {
+        const bar = output.createDiv({ cls: "chess-eval-bar" });
+        const isMate = bestScore.type === "mate";
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+        const whitePct = isMate
+          ? (bestScore.value > 0 ? 100 : 0)
+          : clamp(50 + (bestScore.value / 10), 5, 95);
+        const fill = bar.createDiv({ cls: "chess-eval-bar-fill" });
+        fill.style.width = `${whitePct}%`;
+        bar.createSpan({ text: scoreToString(bestScore), cls: "chess-eval-bar-label" });
+      }
+
       // Show eval list
-      for (const move of result.moves) {
+      for (const [i, move] of result.moves.entries()) {
+        const pvMoves = uciPvToSan(state, move.pv.slice(0, 5));
         const row = output.createDiv({ cls: "chess-analysis-row" });
-        row.createSpan({ text: scoreToString(move.score), cls: "chess-analysis-score" });
-        row.createSpan({ text: move.pv.slice(0, 5).join(" "), cls: "chess-analysis-pv" });
+        row.createSpan({ text: `${i + 1}.`, cls: "chess-analysis-rank" });
+        const scoreClass = move.score.type === "mate"
+          ? "chess-analysis-score chess-analysis-score--mate"
+          : "chess-analysis-score";
+        row.createSpan({ text: scoreToString(move.score), cls: scoreClass });
+        const pvEl = row.createSpan({ cls: "chess-analysis-pv" });
+        for (const [j, pvMove] of pvMoves.entries()) {
+          const btn = pvEl.createEl("button", {
+            text: pvMove.san,
+            cls: j === 0 ? "chess-pv-move chess-pv-move--best" : "chess-pv-move",
+          });
+          if (onGraftLine) {
+            btn.addEventListener("click", () => onGraftLine(pvMoves, j));
+          } else {
+            btn.disabled = true;
+          }
+        }
+        row.createSpan({ text: `d${move.depth}`, cls: "chess-analysis-depth" });
       }
 
       btn.textContent = "Re-analyse";
@@ -610,7 +642,10 @@ export default class ChessPlugin extends Plugin {
               () => viewer.getCurrentState(),
               baseConfig,
               this.getEngineWorker.bind(this),
-              (arrows) => { viewer.setEngineArrows(arrows); }
+              (arrows) => { viewer.setEngineArrows(arrows); },
+              (pvMoves, upToIndex) => {
+                viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
+              }
             );
             analysisReset = reset;
           }

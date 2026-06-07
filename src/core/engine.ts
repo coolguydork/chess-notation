@@ -1,5 +1,7 @@
 import type { BoardState } from "./types";
 import { serializeFEN } from "./fen";
+import { getLegalMoves } from "./legal";
+import { applyMoveEx } from "./moves";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +32,41 @@ export interface EngineMove {
 export interface AnalysisResult {
   moves: EngineMove[]; // one per multipv line, sorted by multipv index
   bestMove: string | null;
+}
+
+/** One move in a decoded principal variation — SAN + board context needed to graft into a MoveNode tree. */
+export interface PvMove {
+  san: string;
+  from: number;
+  to: number;
+  state: BoardState; // board state AFTER this move
+}
+
+/**
+ * Convert a UCI principal variation (e.g. ["e2e4","e7e5"]) to SAN + state pairs,
+ * starting from `startState`. Stops early if any move is illegal.
+ */
+function uciSquare(sq: string): number {
+  const file = sq.charCodeAt(0) - 97; // 'a'=0
+  const rank = parseInt(sq[1], 10) - 1; // '1'=0
+  return (7 - rank) * 8 + file;
+}
+
+export function uciPvToSan(startState: BoardState, uciMoves: string[]): PvMove[] {
+  const result: PvMove[] = [];
+  let state = startState;
+  for (const uci of uciMoves) {
+    const fromIdx = uciSquare(uci.slice(0, 2));
+    const toIdx   = uciSquare(uci.slice(2, 4));
+    const promo   = uci.length > 4 ? uci[4] : undefined;
+    const legal   = getLegalMoves(state);
+    const match   = legal.find(m => m.from === fromIdx && m.to === toIdx && (promo ? m.promotion === promo : true));
+    if (!match) break;
+    const mr = applyMoveEx(state, match.san);
+    result.push({ san: match.san, from: fromIdx, to: toIdx, state: mr.state });
+    state = mr.state;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
