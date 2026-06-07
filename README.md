@@ -12,7 +12,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 | **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons or by clicking any move token in the move list. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
-| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyze button. Coloured arrows show the top moves; a score list shows evaluations and principal variations. |
+| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyze button. Colored arrows show the top moves; a score list shows evaluations and principal variations. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
 | **Board orientation** | Flip any board to Black's perspective with `orientation: black`. |
 | **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
@@ -234,9 +234,9 @@ Six built-in themes. Set `theme:` in any block, or choose a default in plugin se
 | Name | Description | Light square | Dark square |
 |---|---|---|---|
 | `classic` | Lichess brown (default) | `#f0d9b5` | `#b58863` |
-| `blue` | Lichess blue-grey | `#dee3e6` | `#8ca2ad` |
+| `blue` | Lichess blue-gray | `#dee3e6` | `#8ca2ad` |
 | `green` | Chess.com green | `#ffffdd` | `#86a666` |
-| `dark` | High-contrast dark grey | `#aaaaaa` | `#555555` |
+| `dark` | High-contrast dark gray | `#aaaaaa` | `#555555` |
 | `walnut` | Warm walnut brown | `#f0c88a` | `#8b5a2b` |
 | `purple` | Soft purple | `#e8d5f5` | `#7c4a8c` |
 
