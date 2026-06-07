@@ -1,7 +1,7 @@
 import { Platform } from "obsidian";
 import type { BoardState } from "../core/types";
-import type { AnalysisResult, EngineMove, EngineMode } from "../core/engine";
-import { positionToUci, parseInfoLine, parseBestMove } from "../core/engine";
+import type { AnalysisResult, EngineMove, EngineMode, UciOptionDef } from "../core/engine";
+import { positionToUci, parseInfoLine, parseBestMove, parseOptionLine } from "../core/engine";
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -9,11 +9,12 @@ import { positionToUci, parseInfoLine, parseBestMove } from "../core/engine";
 
 export interface EngineWorkerConfig {
   mode: EngineMode;
-  externalPath?: string; // explicit binary path; auto-discovered when absent
-  wasmDir?: string;      // directory containing the WASM engine files
-  wasmJs?: string;       // JS loader filename (default "stockfish-18-lite-single.js")
-  multiPV?: number;      // default 3
-  depth?: number;        // default 20
+  externalPath?: string;                  // explicit binary path; auto-discovered when absent
+  wasmDir?: string;                       // directory containing the WASM engine files
+  wasmJs?: string;                        // JS loader filename (default "stockfish-18-lite-single.js")
+  multiPV?: number;                       // default 3
+  depth?: number;                         // default 20
+  userOptions?: Record<string, string>;   // engine options set by the user (setoption name X value Y)
 }
 
 const DEFAULT_WASM_JS = "stockfish-18-lite-single.js";
@@ -22,20 +23,32 @@ const DEFAULT_WASM_JS = "stockfish-18-lite-single.js";
 // Pure helpers (exported for testing)
 // ---------------------------------------------------------------------------
 
-/** Build the full sequence of UCI commands to send for one analysis request. */
+export interface UciSession {
+  /** Sent immediately in order: uci, setoptions, isready. */
+  setup: string[];
+  /** Sent after readyok. */
+  position: string;
+  /** Sent immediately after position. */
+  go: string;
+}
+
+/** Build a UCI analysis session for a position. */
 export function buildUciCommands(
   state: BoardState,
   history: string[],
   depth: number,
-  multiPV: number
-): string[] {
-  return [
-    "uci",
+  multiPV: number,
+  userOptions: Record<string, string> = {}
+): UciSession {
+  const setoptions = [
     `setoption name MultiPV value ${multiPV}`,
-    "isready",
-    positionToUci(state, history),
-    `go depth ${depth}`,
+    ...Object.entries(userOptions).map(([k, v]) => `setoption name ${k} value ${v}`),
   ];
+  return {
+    setup: ["uci", ...setoptions, "isready"],
+    position: positionToUci(state, history),
+    go: `go depth ${depth}`,
+  };
 }
 
 /**
@@ -78,12 +91,12 @@ export interface WorkerLike {
 
 /**
  * Run a full UCI analysis session over an abstract worker.
- * Sends the first three commands (uci, setoption, isready) immediately;
+ * Sends setup commands (uci, setoptions, isready) immediately;
  * position + go are sent after readyok is received.
  */
 export function runWasmAnalysis(
   worker: WorkerLike,
-  commands: string[]
+  session: UciSession
 ): Promise<AnalysisResult> {
   return new Promise<AnalysisResult>((resolve, reject) => {
     const outputLines: string[] = [];
@@ -103,8 +116,8 @@ export function runWasmAnalysis(
 
       if (!readyOkSeen && line === "readyok") {
         readyOkSeen = true;
-        worker.postMessage(commands[3]); // position
-        worker.postMessage(commands[4]); // go depth
+        worker.postMessage(session.position);
+        worker.postMessage(session.go);
         return;
       }
 
@@ -121,9 +134,9 @@ export function runWasmAnalysis(
       }
     };
 
-    worker.postMessage(commands[0]); // uci
-    worker.postMessage(commands[1]); // setoption
-    worker.postMessage(commands[2]); // isready
+    for (const cmd of session.setup) {
+      worker.postMessage(cmd);
+    }
   });
 }
 
@@ -204,6 +217,7 @@ function spawnProcess(binaryPath: string): ChildProcess {
 export class EngineWorker {
   readonly mode: EngineMode;
   readonly path: string;
+  readonly userOptionsKey: string;
   private config: Required<EngineWorkerConfig>;
   private proc: ChildProcess | null = null;
   private binaryPath: string | null = null;
@@ -213,6 +227,7 @@ export class EngineWorker {
   constructor(config: EngineWorkerConfig) {
     this.mode = config.mode;
     this.path = config.externalPath ?? "";
+    this.userOptionsKey = JSON.stringify(config.userOptions ?? {});
     this.config = {
       mode: config.mode,
       externalPath: config.externalPath ?? "",
@@ -220,6 +235,7 @@ export class EngineWorker {
       wasmJs: config.wasmJs ?? DEFAULT_WASM_JS,
       multiPV: config.multiPV ?? 3,
       depth: config.depth ?? 20,
+      userOptions: config.userOptions ?? {},
     };
   }
 
@@ -289,12 +305,12 @@ export class EngineWorker {
 
   /** Analyse a position. Resolves with the best lines found at the configured depth. */
   async analyse(state: BoardState, history: string[]): Promise<AnalysisResult> {
+    const { depth, multiPV, userOptions } = this.config;
+    const session = buildUciCommands(state, history, depth, multiPV, userOptions);
+
     if (this.useWasm) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const engine: any = await this.getWasmEngine();
-
-      const { depth, multiPV } = this.config;
-      const commands = buildUciCommands(state, history, depth, multiPV);
       const outputLines: string[] = [];
       let readyOkSeen = false;
 
@@ -315,8 +331,8 @@ export class EngineWorker {
 
           if (!readyOkSeen && trimmed === "readyok") {
             readyOkSeen = true;
-            send(commands[3]); // position
-            send(commands[4]); // go
+            send(session.position);
+            send(session.go);
             return;
           }
 
@@ -329,8 +345,9 @@ export class EngineWorker {
 
         // On re-analysis, reset engine state before sending a new position.
         send("ucinewgame");
-        send(commands[1]); // setoption MultiPV (in case depth/multipv changed)
-        send("isready");   // wait for readyok before position + go
+        // Send all setoptions (skipping "uci" at index 0, "isready" at end)
+        for (const cmd of session.setup.slice(1, -1)) send(cmd);
+        send("isready"); // wait for readyok before position + go
       });
     }
 
@@ -339,9 +356,6 @@ export class EngineWorker {
       if (!path) throw new Error("UCI engine binary not found");
       this.binaryPath = path;
     }
-
-    const { depth, multiPV } = this.config;
-    const commands = buildUciCommands(state, history, depth, multiPV);
 
     return new Promise<AnalysisResult>((resolve, reject) => {
       const proc = spawnProcess(this.binaryPath!);
@@ -365,8 +379,8 @@ export class EngineWorker {
 
           if (!readyOkSeen && trimmed === "readyok") {
             readyOkSeen = true;
-            send(commands[3]); // position
-            send(commands[4]); // go depth
+            send(session.position);
+            send(session.go);
           }
 
           if (!resolved && trimmed.startsWith("bestmove")) {
@@ -384,10 +398,58 @@ export class EngineWorker {
         }
       });
 
-      // uci + setoption + isready go immediately; position + go wait for readyok
-      send(commands[0]); // uci
-      send(commands[1]); // setoption MultiPV
-      send(commands[2]); // isready
+      for (const cmd of session.setup) send(cmd);
+    });
+  }
+
+  /**
+   * Probe the engine binary and return all UCI options it advertises.
+   * Returns an empty array when using WASM mode or if the binary is unreachable.
+   */
+  async discoverOptions(): Promise<UciOptionDef[]> {
+    if (this.useWasm) return [];
+
+    const binaryPath = this.binaryPath
+      ?? await findExternalBinary(this.config.externalPath || undefined);
+    if (!binaryPath) return [];
+
+    return new Promise<UciOptionDef[]>((resolve) => {
+      let proc: ChildProcess;
+      try { proc = spawnProcess(binaryPath); }
+      catch { resolve([]); return; }
+
+      const options: UciOptionDef[] = [];
+      let buffer = "";
+      let done = false;
+
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { proc.kill(); } catch { /* ignore */ }
+        resolve(options);
+      };
+
+      const timer = setTimeout(finish, 3000);
+
+      proc.stdout.on("data", (chunk: Buffer | string) => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("option ")) {
+            const opt = parseOptionLine(trimmed);
+            if (opt) options.push(opt);
+          }
+          if (trimmed === "uciok") finish();
+        }
+      });
+
+      proc.on("error", () => { clearTimeout(timer); resolve([]); });
+      proc.on("close", () => { clearTimeout(timer); resolve(options); });
+
+      proc.stdin.write("uci\n");
     });
   }
 

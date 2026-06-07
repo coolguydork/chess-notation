@@ -109,6 +109,74 @@ export function parseBestMove(line: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// UCI option types
+// ---------------------------------------------------------------------------
+
+export interface UciOptionCheck  { name: string; type: "check";  default: boolean }
+export interface UciOptionSpin   { name: string; type: "spin";   default: number; min: number; max: number }
+export interface UciOptionCombo  { name: string; type: "combo";  default: string; vars: string[] }
+export interface UciOptionButton { name: string; type: "button" }
+export interface UciOptionString { name: string; type: "string"; default: string }
+
+export type UciOptionDef =
+  | UciOptionCheck
+  | UciOptionSpin
+  | UciOptionCombo
+  | UciOptionButton
+  | UciOptionString;
+
+/**
+ * Parse a UCI `option` line into a typed descriptor.
+ * Returns null for unrecognised types or malformed lines.
+ */
+export function parseOptionLine(line: string): UciOptionDef | null {
+  if (!line.startsWith("option name ")) return null;
+  const after = line.slice("option name ".length);
+
+  const typeMarker = " type ";
+  const typeIdx = after.indexOf(typeMarker);
+  if (typeIdx === -1) return null;
+
+  const name = after.slice(0, typeIdx).trim();
+  const typeAndRest = after.slice(typeIdx + typeMarker.length);
+  const spaceIdx = typeAndRest.indexOf(" ");
+  const type = spaceIdx === -1 ? typeAndRest : typeAndRest.slice(0, spaceIdx);
+  const attrs = spaceIdx === -1 ? "" : typeAndRest.slice(spaceIdx + 1);
+
+  switch (type) {
+    case "check": {
+      const m = attrs.match(/\bdefault\s+(\S+)/);
+      return { name, type: "check", default: m?.[1] === "true" };
+    }
+    case "spin": {
+      const def = attrs.match(/\bdefault\s+(-?\d+)/);
+      const min = attrs.match(/\bmin\s+(-?\d+)/);
+      const max = attrs.match(/\bmax\s+(-?\d+)/);
+      if (!def || !min || !max) return null;
+      return { name, type: "spin",
+        default: parseInt(def[1], 10),
+        min: parseInt(min[1], 10),
+        max: parseInt(max[1], 10) };
+    }
+    case "combo": {
+      const defMatch = attrs.match(/\bdefault\s+(\S+)/);
+      const def = defMatch?.[1] ?? "";
+      const vars = [...attrs.matchAll(/\bvar\s+(\S+)/g)].map((m) => m[1]);
+      return { name, type: "combo", default: def, vars };
+    }
+    case "button":
+      return { name, type: "button" };
+    case "string": {
+      const m = attrs.match(/\bdefault\s+(.*)/);
+      const raw = m ? m[1].trim() : "";
+      return { name, type: "string", default: raw === "<empty>" ? "" : raw };
+    }
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Display helpers
 // ---------------------------------------------------------------------------
 

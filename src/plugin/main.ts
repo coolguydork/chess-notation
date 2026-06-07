@@ -15,6 +15,7 @@ import {
   themeNames,
 } from "../render/config";
 import { scoreToString } from "../core/engine";
+import type { UciOptionDef } from "../core/engine";
 import { EngineWorker } from "./engine-worker";
 import type { Piece, BoardState, MoveNode, PgnGame } from "../core/types";
 
@@ -30,9 +31,11 @@ interface ChessPluginSettings {
   showCoordinates: boolean;
   pieceSource: PieceSource;
   engineMode: "auto" | "external" | "wasm";
-  enginePath: string;   // explicit binary path; empty = auto-discover
+  enginePath: string;                      // explicit binary path; empty = auto-discover
   engineDepth: number;
   engineMultiPV: number;
+  engineDiscoveredOptions: UciOptionDef[]; // cached from last successful probe
+  engineUserOptions: Record<string, string>; // user-set option values (setoption name X value Y)
 }
 
 const DEFAULT_SETTINGS: ChessPluginSettings = {
@@ -44,6 +47,8 @@ const DEFAULT_SETTINGS: ChessPluginSettings = {
   enginePath: "",
   engineDepth: 18,
   engineMultiPV: 3,
+  engineDiscoveredOptions: [],
+  engineUserOptions: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -333,8 +338,8 @@ class ChessSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Stockfish binary path")
-      .setDesc("Absolute path to the Stockfish executable. Leave blank to auto-discover.")
+      .setName("Engine binary path")
+      .setDesc("Absolute path to a UCI-compatible engine executable. Leave blank to auto-discover.")
       .addText((text) => {
         text
           .setPlaceholder("/opt/homebrew/bin/stockfish")
@@ -347,7 +352,7 @@ class ChessSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Analysis depth")
-      .setDesc("How deeply Stockfish searches (higher = stronger but slower).")
+      .setDesc("Search depth (higher = stronger but slower).")
       .addSlider((slider) => {
         slider
           .setLimits(8, 30, 1)
@@ -372,6 +377,94 @@ class ChessSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    containerEl.createEl("h4", { text: "Engine options" });
+
+    // Options the plugin manages through its own dedicated settings.
+    const PLUGIN_MANAGED = new Set(["MultiPV"]);
+
+    const probeRow = new Setting(containerEl)
+      .setName("Discover options")
+      .setDesc("Probe the configured engine to load its available settings.");
+    probeRow.addButton((btn) => {
+      btn.setButtonText("Probe engine").onClick(async () => {
+        btn.setDisabled(true);
+        btn.setButtonText("Probing…");
+        try {
+          const opts = await this.plugin.getEngineWorker().discoverOptions();
+          this.plugin.settings.engineDiscoveredOptions = opts;
+          await this.plugin.saveSettings();
+        } catch { /* ignore — engine not available */ }
+        this.display();
+      });
+    });
+
+    const discoverable = this.plugin.settings.engineDiscoveredOptions
+      .filter((o) => !PLUGIN_MANAGED.has(o.name) && o.type !== "button");
+
+    if (discoverable.length === 0) {
+      containerEl.createEl("p", {
+        text: this.plugin.settings.engineDiscoveredOptions.length === 0
+          ? "Click 'Probe engine' to load available options."
+          : "No user-configurable options reported by this engine.",
+        cls: "chess-settings-note",
+      });
+    }
+
+    for (const opt of discoverable) {
+      const saved = this.plugin.settings.engineUserOptions[opt.name];
+      const row = new Setting(containerEl).setName(opt.name);
+
+      if (opt.type === "check") {
+        const cur = saved !== undefined ? saved === "true" : opt.default;
+        row.addToggle((t) =>
+          t.setValue(cur).onChange(async (v) => {
+            this.plugin.settings.engineUserOptions[opt.name] = v ? "true" : "false";
+            await this.plugin.saveSettings();
+          })
+        );
+      } else if (opt.type === "spin") {
+        const cur = saved !== undefined ? parseInt(saved, 10) : opt.default;
+        if (opt.max - opt.min <= 1000) {
+          row.addSlider((sl) =>
+            sl.setLimits(opt.min, opt.max, 1)
+              .setValue(cur)
+              .setDynamicTooltip()
+              .onChange(async (v) => {
+                this.plugin.settings.engineUserOptions[opt.name] = String(v);
+                await this.plugin.saveSettings();
+              })
+          );
+        } else {
+          row.setDesc(`${opt.min} – ${opt.max}`).addText((t) =>
+            t.setValue(String(cur)).onChange(async (v) => {
+              const n = parseInt(v, 10);
+              if (!isNaN(n) && n >= opt.min && n <= opt.max) {
+                this.plugin.settings.engineUserOptions[opt.name] = String(n);
+                await this.plugin.saveSettings();
+              }
+            })
+          );
+        }
+      } else if (opt.type === "combo") {
+        const cur = saved ?? opt.default;
+        row.addDropdown((d) => {
+          for (const v of opt.vars) d.addOption(v, v);
+          d.setValue(cur).onChange(async (v) => {
+            this.plugin.settings.engineUserOptions[opt.name] = v;
+            await this.plugin.saveSettings();
+          });
+        });
+      } else if (opt.type === "string") {
+        const cur = saved ?? opt.default;
+        row.addText((t) =>
+          t.setValue(cur).onChange(async (v) => {
+            this.plugin.settings.engineUserOptions[opt.name] = v;
+            await this.plugin.saveSettings();
+          })
+        );
+      }
+    }
   }
 }
 
@@ -384,10 +477,12 @@ export default class ChessPlugin extends Plugin {
   private engineWorker: EngineWorker | null = null;
 
   getEngineWorker(): EngineWorker {
+    const optionsKey = JSON.stringify(this.settings.engineUserOptions);
     if (
       !this.engineWorker ||
       this.engineWorker.mode !== this.settings.engineMode ||
-      this.engineWorker.path !== this.settings.enginePath
+      this.engineWorker.path !== this.settings.enginePath ||
+      this.engineWorker.userOptionsKey !== optionsKey
     ) {
       this.engineWorker?.dispose();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -401,6 +496,7 @@ export default class ChessPlugin extends Plugin {
         wasmDir: pluginDir,
         depth: this.settings.engineDepth,
         multiPV: this.settings.engineMultiPV,
+        userOptions: this.settings.engineUserOptions,
       });
     }
     return this.engineWorker;

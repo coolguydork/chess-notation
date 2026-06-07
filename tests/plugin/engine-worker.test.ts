@@ -4,6 +4,7 @@ import {
   collectAnalysis,
   runWasmAnalysis,
   type WorkerLike,
+  type UciSession,
 } from "../../src/plugin/engine-worker";
 import { parseFEN } from "../../src/core/fen";
 
@@ -14,38 +15,42 @@ const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 // ---------------------------------------------------------------------------
 
 describe("buildUciCommands", () => {
-  it("opens with uci and isready", () => {
+  it("setup begins with uci and ends with isready", () => {
     const state = parseFEN(STARTING_FEN);
-    const cmds = buildUciCommands(state, [], 15, 3);
-    expect(cmds[0]).toBe("uci");
-    expect(cmds).toContain("isready");
+    const session = buildUciCommands(state, [], 15, 3);
+    expect(session.setup[0]).toBe("uci");
+    expect(session.setup.at(-1)).toBe("isready");
   });
 
-  it("includes setoption for MultiPV", () => {
+  it("includes setoption for MultiPV in setup", () => {
     const state = parseFEN(STARTING_FEN);
-    const cmds = buildUciCommands(state, [], 15, 3);
-    expect(cmds).toContain("setoption name MultiPV value 3");
+    const session = buildUciCommands(state, [], 15, 3);
+    expect(session.setup).toContain("setoption name MultiPV value 3");
   });
 
-  it("sends position then go depth", () => {
+  it("includes user options as setoption commands", () => {
     const state = parseFEN(STARTING_FEN);
-    const cmds = buildUciCommands(state, [], 15, 3);
-    const posIdx = cmds.findIndex((c) => c.startsWith("position"));
-    const goIdx = cmds.findIndex((c) => c.startsWith("go depth"));
-    expect(posIdx).toBeGreaterThan(-1);
-    expect(goIdx).toBeGreaterThan(posIdx);
+    const session = buildUciCommands(state, [], 15, 3, { "Skill Level": "10", "Threads": "2" });
+    expect(session.setup).toContain("setoption name Skill Level value 10");
+    expect(session.setup).toContain("setoption name Threads value 2");
+  });
+
+  it("position starts with 'position'", () => {
+    const state = parseFEN(STARTING_FEN);
+    const session = buildUciCommands(state, [], 15, 3);
+    expect(session.position).toMatch(/^position/);
   });
 
   it("includes history in position command", () => {
     const state = parseFEN(STARTING_FEN);
-    const cmds = buildUciCommands(state, ["e2e4", "e7e5"], 15, 1);
-    expect(cmds).toContain("position startpos moves e2e4 e7e5");
+    const session = buildUciCommands(state, ["e2e4", "e7e5"], 15, 1);
+    expect(session.position).toBe("position startpos moves e2e4 e7e5");
   });
 
   it("uses the specified depth in go command", () => {
     const state = parseFEN(STARTING_FEN);
-    const cmds = buildUciCommands(state, [], 20, 1);
-    expect(cmds).toContain("go depth 20");
+    const session = buildUciCommands(state, [], 20, 1);
+    expect(session.go).toBe("go depth 20");
   });
 });
 
@@ -148,17 +153,21 @@ function makeFakeWorker(responses: string[]): WorkerLike & { sent: string[] } {
 }
 
 describe("runWasmAnalysis", () => {
-  const commands = ["uci", "setoption name MultiPV value 3", "isready", "position startpos", "go depth 20"];
+  const session: UciSession = {
+    setup: ["uci", "setoption name MultiPV value 3", "isready"],
+    position: "position startpos",
+    go: "go depth 20",
+  };
 
-  it("sends uci, setoption, and isready immediately", async () => {
+  it("sends all setup commands immediately", async () => {
     const worker = makeFakeWorker([]);
-    await runWasmAnalysis(worker, commands);
+    await runWasmAnalysis(worker, session);
     expect(worker.sent.slice(0, 3)).toEqual(["uci", "setoption name MultiPV value 3", "isready"]);
   });
 
   it("sends position and go only after readyok", async () => {
     const worker = makeFakeWorker([]);
-    await runWasmAnalysis(worker, commands);
+    await runWasmAnalysis(worker, session);
     const readyIdx = worker.sent.indexOf("isready");
     const posIdx = worker.sent.indexOf("position startpos");
     expect(posIdx).toBeGreaterThan(readyIdx);
@@ -166,20 +175,20 @@ describe("runWasmAnalysis", () => {
 
   it("resolves with bestmove from engine output", async () => {
     const worker = makeFakeWorker([]);
-    const result = await runWasmAnalysis(worker, commands);
+    const result = await runWasmAnalysis(worker, session);
     expect(result.bestMove).toBe("e2e4");
   });
 
   it("collects info lines before bestmove", async () => {
     const worker = makeFakeWorker([]);
-    const result = await runWasmAnalysis(worker, commands);
+    const result = await runWasmAnalysis(worker, session);
     expect(result.moves).toHaveLength(1);
     expect(result.moves[0].uci).toBe("e2e4");
   });
 
   it("terminates the worker after bestmove", async () => {
     const worker = makeFakeWorker([]);
-    await runWasmAnalysis(worker, commands);
+    await runWasmAnalysis(worker, session);
     expect(worker.terminate).toHaveBeenCalled();
   });
 
@@ -187,6 +196,6 @@ describe("runWasmAnalysis", () => {
     const worker = makeFakeWorker([]);
     const fakeError = { message: "wasm load failed" } as ErrorEvent;
     setTimeout(() => worker.onerror?.(fakeError), 0);
-    await expect(runWasmAnalysis(worker, commands)).rejects.toThrow("wasm load failed");
+    await expect(runWasmAnalysis(worker, session)).rejects.toThrow("wasm load failed");
   });
 });

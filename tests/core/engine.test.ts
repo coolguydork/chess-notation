@@ -3,6 +3,7 @@ import {
   positionToUci,
   parseInfoLine,
   parseBestMove,
+  parseOptionLine,
   scoreToString,
   type EngineMove,
   type AnalysisResult,
@@ -107,6 +108,57 @@ describe("parseBestMove", () => {
 
   it("returns null for bestmove (none)", () => {
     expect(parseBestMove("bestmove (none)")).toBeNull();
+  });
+});
+
+describe("parseOptionLine", () => {
+  it("returns null for non-option lines", () => {
+    expect(parseOptionLine("uciok")).toBeNull();
+    expect(parseOptionLine("info depth 20 score cp 30 pv e2e4")).toBeNull();
+  });
+
+  it("parses a spin option", () => {
+    const result = parseOptionLine("option name Hash type spin default 16 min 1 max 33554432");
+    expect(result).toEqual({ name: "Hash", type: "spin", default: 16, min: 1, max: 33554432 });
+  });
+
+  it("parses a spin option with spaces in the name", () => {
+    const result = parseOptionLine("option name Skill Level type spin default 20 min 0 max 20");
+    expect(result).toEqual({ name: "Skill Level", type: "spin", default: 20, min: 0, max: 20 });
+  });
+
+  it("parses a check option (default true)", () => {
+    const result = parseOptionLine("option name Syzygy50MoveRule type check default true");
+    expect(result).toEqual({ name: "Syzygy50MoveRule", type: "check", default: true });
+  });
+
+  it("parses a check option (default false)", () => {
+    const result = parseOptionLine("option name Ponder type check default false");
+    expect(result).toEqual({ name: "Ponder", type: "check", default: false });
+  });
+
+  it("parses a string option", () => {
+    const result = parseOptionLine("option name EvalFile type string default nn-abc123.nnue");
+    expect(result).toEqual({ name: "EvalFile", type: "string", default: "nn-abc123.nnue" });
+  });
+
+  it("maps <empty> default to empty string for string options", () => {
+    const result = parseOptionLine("option name SyzygyPath type string default <empty>");
+    expect(result).toEqual({ name: "SyzygyPath", type: "string", default: "" });
+  });
+
+  it("parses a button option", () => {
+    const result = parseOptionLine("option name Clear Hash type button");
+    expect(result).toEqual({ name: "Clear Hash", type: "button" });
+  });
+
+  it("parses a combo option", () => {
+    const result = parseOptionLine("option name Style type combo default Risky var Solid var Risky var Crazy");
+    expect(result).toEqual({ name: "Style", type: "combo", default: "Risky", vars: ["Solid", "Risky", "Crazy"] });
+  });
+
+  it("returns null for spin missing min/max", () => {
+    expect(parseOptionLine("option name Hash type spin default 16")).toBeNull();
   });
 });
 
