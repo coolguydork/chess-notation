@@ -440,6 +440,37 @@ function mountInteractiveBoard(
 }
 
 // ---------------------------------------------------------------------------
+// Viewer position cache
+// When write-back triggers a re-render, the new block processor call restores
+// the user's position rather than dropping them back to the root.
+// Key: "sourcePath:lineStart"  Value: ordered SANs from root → current node
+// ---------------------------------------------------------------------------
+
+const viewerPositionCache = new Map<string, string[]>();
+
+function nodeToPath(node: MoveNode): string[] {
+  const path: string[] = [];
+  let cur: MoveNode | null = node;
+  while (cur !== null && cur.san !== null) {
+    path.unshift(cur.san);
+    cur = cur.parent;
+  }
+  return path;
+}
+
+function pathToNode(root: MoveNode, path: string[]): MoveNode {
+  let cur = root;
+  for (const san of path) {
+    const next = cur.next?.san === san
+      ? cur.next
+      : cur.next?.variationHeads.find(v => v.san === san);
+    if (!next) break;
+    cur = next;
+  }
+  return cur;
+}
+
+// ---------------------------------------------------------------------------
 // PGN write-back
 // Serializes the live MoveNode tree and overwrites the pgn: line in the
 // source file. Silently no-ops when called outside a file context (e.g.
@@ -848,7 +879,12 @@ export default class ChessPlugin extends Plugin {
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
           let root: MoveNode = buildMoveTree(startFen, games[0].moves);
-          let current: MoveNode = root;
+
+          // Restore position saved before a write-back re-render
+          const sectionInfo = ctx.getSectionInfo(el);
+          const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
+          const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
+          let current: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
 
           const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
           const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
@@ -881,6 +917,7 @@ export default class ChessPlugin extends Plugin {
             games[gameIndex].result,
             (node) => {
               current = node;
+              if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(node));
               analysisReset?.();
               viewer.update(node);
               if (games.length === 1) {
