@@ -21,6 +21,15 @@ tests/
   plugin/
 ```
 
+> **Planned fourth layer — `view/` (DOM-aware, Obsidian-free).** Interaction
+> logic (pointer/drag handling, selection, animation, the PGN viewer) is
+> DOM-aware but not Obsidian-specific, and currently has no home, so it
+> accumulated in `plugin/main.ts`. It is being extracted into a `view/` layer
+> that sits between `render/` and `plugin/` (flow: `core → render → view →
+> plugin`). **Until that lands, do not add new interaction logic to `plugin/` —
+> it belongs in `view/`.** See [`pgn-viewer-retrospective.md`](pgn-viewer-retrospective.md),
+> Tasks A–B.
+
 ### `core/` — Chess logic
 - Board state, move generation, rule enforcement
 - FEN parsing and serialization (`fen.ts`)
@@ -169,6 +178,47 @@ Do not make architectural decisions that would foreclose either option.
 | Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |
 | Themes as named presets | Easy to extend; per-block `theme:` key overrides the plugin default |
 
+## Lessons learned (`plugin/` layer discipline)
+
+The three-layer boundary held perfectly across all phases — `core/` and
+`render/` stayed clean and barely churned. **Every painful rewrite happened in
+`plugin/`, where stateful UI wiring lives.** These principles are the distilled
+cost of those rewrites; apply them to any new `plugin/` work, especially the
+PGN viewer rewrite tracked in [`pgn-viewer-retrospective.md`](pgn-viewer-retrospective.md).
+
+- **Model for the next phase, not just the current one.** The biggest rewrites
+  all came from a data/render shape that fit the current scope but not the known
+  future one: `Snapshot[]` → `MoveNode` tree (variations were already planned),
+  full re-render → DOM-stable mount (interactivity was already planned). When the
+  Phases section names a future requirement, give the *shape* room for it now,
+  even if the UI comes later. A linear game is just a tree with no branches.
+
+- **One owner per piece of mutable state.** Duplicating state across closures and
+  syncing it by hand is the root smell behind most viewer bugs (e.g. `current`
+  living in both the viewer and the block-processor closure). State lives in
+  exactly one place; others observe it via an event/hook, never via a callback
+  that re-enters and re-sets it.
+
+- **One writer per shared DOM node.** A node mutated by several code paths (the
+  board: interactive + hover + engine arrows + animation) races and goes stale.
+  Give each shared node a single owner; everything else calls a method on that
+  owner instead of writing `innerHTML` directly.
+
+- **Stable skeleton, delegated events, region re-renders.** Build the container
+  DOM once; re-render only the inner region that changed; attach listeners to
+  stable parents so they survive `innerHTML` swaps. Never rebuild a subtree that
+  owns event handlers or transient state.
+
+- **Side effects fire on the transition that warrants them.** Persisting,
+  network, or file writes belong on the specific transition that changes the
+  underlying data — not on a catch-all navigation handler. (Write-back belongs on
+  a move/promote, not on every prev/next.)
+
+- **Keep `plugin/` thin; extract an owning class before a closure grows stateful.**
+  When block-processor wiring starts accumulating navigation/animation/lifecycle
+  state, that is the signal to extract a small class that owns it — not to add
+  another closure variable.
+
 ## Piece asset strategy
 
 Pieces are resolved via a `PieceSource` discriminated union injected into the
@@ -202,7 +252,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (165 tests across 7 suites)
+npm test           # vitest unit tests (289 tests across 9 suites)
 npm run dev        # watch mode
 ```
 
