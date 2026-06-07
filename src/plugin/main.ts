@@ -1,17 +1,16 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../render/controls";
-import { getSquareLegalMoves } from "../core/legal";
-import { applyMove, applyMoveEx } from "../core/moves";
+import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
+import { mountInteractiveBoard } from "../view/interactive-board";
+import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
   BoardConfig,
   PieceSource,
   EngineArrow,
-  UserArrow,
   getBoardColors,
   themeNames,
 } from "../render/config";
@@ -125,25 +124,6 @@ function resolvePieceUrl(
 // Click-to-move board (FEN blocks)
 // ---------------------------------------------------------------------------
 
-function squareFromEvent(
-  e: MouseEvent | PointerEvent,
-  squareSize: number,
-  orientation: "white" | "black"
-): number | null {
-  const svg = (e.currentTarget as HTMLElement).querySelector("svg.chess-board-svg");
-  if (!svg) return null;
-  const rect = svg.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  const scale = rect.width / (squareSize * 8);
-  const col = Math.floor(x / (squareSize * scale));
-  const row = Math.floor(y / (squareSize * scale));
-  if (col < 0 || col > 7 || row < 0 || row > 7) return null;
-  const file = orientation === "white" ? col : 7 - col;
-  const rank = orientation === "white" ? 7 - row : row;
-  return (7 - rank) * 8 + file;
-}
-
 // Build a human-readable label for a game in a multi-game selector.
 function gameLabel(game: PgnGame, index: number): string {
   const w = game.headers["White"];
@@ -156,291 +136,6 @@ function gameLabel(game: PgnGame, index: number): string {
   return `Game ${index + 1}`;
 }
 
-const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
-
-interface InteractiveBoardHandle {
-  getState: () => BoardState;
-  setState: (s: BoardState, lastMove?: { from: number; to: number }) => void;
-}
-
-function mountInteractiveBoard(
-  wrapper: HTMLElement,
-  initialState: BoardState,
-  baseConfig: BoardConfig,
-  turnIndicator?: HTMLElement,
-  onMove?: (san: string) => void,
-): InteractiveBoardHandle {
-  let state = initialState;
-  let lastMove: { from: number; to: number } | undefined;
-  let selected: number | null = null;
-  let legalTargets = new Set<number>();
-  let userArrows: UserArrow[] = [];
-  let rightDragStart: number | null = null;
-
-  // Drag state
-  let dragSource: number | null = null;
-  let dragGhost: HTMLImageElement | null = null;
-  let dragMoved = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-
-  function updateTurnIndicator(): void {
-    if (!turnIndicator) return;
-    const color = state.activeColor;
-    turnIndicator.className = `chess-turn-indicator chess-turn-indicator--${color}`;
-    turnIndicator.setText(color === "w" ? "White to move" : "Black to move");
-  }
-
-  function render(): void {
-    const config: BoardConfig = {
-      ...baseConfig,
-      lastMove,
-      selectedSquare: selected ?? undefined,
-      legalTargets: legalTargets.size > 0 ? legalTargets : undefined,
-      userArrows: userArrows.length > 0 ? userArrows : undefined,
-    };
-    wrapper.innerHTML = renderBoard(state, config);
-    updateTurnIndicator();
-  }
-
-  function removeGhost(): void {
-    if (dragGhost) {
-      dragGhost.remove();
-      dragGhost = null;
-    }
-  }
-
-  // Show a floating comment input near the midpoint of the most-recently drawn arrow.
-  // Resolves with the entered label (empty string = no label) or null if cancelled.
-  function promptArrowLabel(fromIdx: number, toIdx: number): Promise<string | null> {
-    return new Promise((resolve) => {
-      const svg = wrapper.querySelector("svg.chess-board-svg");
-      if (!svg) { resolve(null); return; }
-      const rect = svg.getBoundingClientRect();
-      const sq = baseConfig.squareSize;
-      const scale = rect.width / (sq * 8);
-
-      function idxToXY(idx: number): { x: number; y: number } {
-        const rank = 7 - Math.floor(idx / 8);
-        const file = idx % 8;
-        const col = baseConfig.orientation === "white" ? file : 7 - file;
-        const row = baseConfig.orientation === "white" ? 7 - rank : rank;
-        return {
-          x: rect.left + (col * sq + sq / 2) * scale,
-          y: rect.top  + (row * sq + sq / 2) * scale,
-        };
-      }
-
-      const p1 = idxToXY(fromIdx);
-      const p2 = idxToXY(toIdx);
-      const mx = (p1.x + p2.x) / 2;
-      const my = (p1.y + p2.y) / 2;
-
-      const overlay = document.createElement("div");
-      overlay.className = "chess-arrow-comment-overlay";
-      overlay.style.cssText = `position:fixed;left:${mx}px;top:${my}px;transform:translate(-50%,-50%);
-        background:#1e1e2e;border:1px solid rgba(220,80,20,0.7);border-radius:6px;
-        padding:6px 8px;display:flex;gap:6px;align-items:center;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.5);`;
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.placeholder = "Add comment… (Enter to save, Esc to skip)";
-      input.style.cssText = `background:transparent;border:none;outline:none;color:#cdd6f4;
-        font-size:13px;width:240px;`;
-
-      const save = document.createElement("button");
-      save.textContent = "✓";
-      save.style.cssText = `background:rgba(220,80,20,0.8);border:none;border-radius:4px;
-        color:#fff;padding:2px 7px;cursor:pointer;font-size:13px;`;
-
-      overlay.appendChild(input);
-      overlay.appendChild(save);
-      document.body.appendChild(overlay);
-      input.focus();
-
-      function done(label: string | null) {
-        overlay.remove();
-        resolve(label);
-      }
-
-      input.addEventListener("keydown", (e: KeyboardEvent) => {
-        if (e.key === "Enter") { e.preventDefault(); done(input.value.trim() || null); }
-        if (e.key === "Escape") { e.preventDefault(); done(null); }
-      });
-      save.addEventListener("click", () => done(input.value.trim() || null));
-
-      // Click outside to dismiss without a label
-      setTimeout(() => {
-        function outside(e: MouseEvent) {
-          if (!overlay.contains(e.target as Node)) {
-            document.removeEventListener("mousedown", outside);
-            done(null);
-          }
-        }
-        document.addEventListener("mousedown", outside);
-      }, 0);
-    });
-  }
-
-  // Left pointer down — begin drag if clicking a friendly piece
-  wrapper.addEventListener("pointerdown", (e: PointerEvent) => {
-    if (e.button !== 0) return;
-    const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
-    if (idx === null) return;
-    const piece = state.board[idx];
-    if (!piece || piece.color !== state.activeColor) return;
-
-    dragSource = idx;
-    dragMoved = false;
-    dragStartX = e.clientX;
-    dragStartY = e.clientY;
-
-    // Show legal move dots immediately
-    selected = idx;
-    legalTargets = new Set(getSquareLegalMoves(state, idx).map(m => m.to));
-    render();
-
-    // Create ghost image
-    const svg = wrapper.querySelector("svg.chess-board-svg");
-    const rect = svg ? svg.getBoundingClientRect() : wrapper.getBoundingClientRect();
-    const scale = rect.width / (baseConfig.squareSize * 8);
-    const ghostSize = Math.round(baseConfig.squareSize * scale);
-
-    const ghost = document.createElement("img");
-    ghost.src = baseConfig.resolvePieceUrl(piece);
-    ghost.style.cssText = `position:fixed;width:${ghostSize}px;height:${ghostSize}px;` +
-      `pointer-events:none;z-index:10000;opacity:0.85;` +
-      `left:${e.clientX - ghostSize / 2}px;top:${e.clientY - ghostSize / 2}px;`;
-    document.body.appendChild(ghost);
-    dragGhost = ghost;
-
-    wrapper.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-
-  // Pointer move — update ghost position
-  wrapper.addEventListener("pointermove", (e: PointerEvent) => {
-    if (dragSource === null || !dragGhost) return;
-    const dx = e.clientX - dragStartX;
-    const dy = e.clientY - dragStartY;
-    if (!dragMoved && Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
-    const ghostSize = parseInt(dragGhost.style.width, 10);
-    dragGhost.style.left = `${e.clientX - ghostSize / 2}px`;
-    dragGhost.style.top  = `${e.clientY - ghostSize / 2}px`;
-  });
-
-  // Left-click / drag-drop move handling
-  wrapper.addEventListener("pointerup", (e: PointerEvent) => {
-    if (e.button !== 0) return;
-    const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
-
-    if (dragSource !== null) {
-      removeGhost();
-      const src = dragSource;
-      dragSource = null;
-
-      if (dragMoved) {
-        // Drag release — attempt move to destination
-        if (idx !== null && legalTargets.has(idx)) {
-          const moves = getSquareLegalMoves(state, src);
-          const move =
-            moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
-            moves.find(m => m.to === idx);
-          if (move) {
-            selected = null;
-            legalTargets = new Set();
-            if (onMove) { onMove(move.san); return; }
-            state = applyMove(state, move.san);
-          }
-        }
-        selected = null;
-        legalTargets = new Set();
-        render();
-        return;
-      }
-
-      // Tiny movement — treat as a click; legal dots already showing, wait for next click
-      // (fall through: state already rendered with selection on pointerdown)
-      return;
-    }
-
-    // No drag in progress — handle second click of click-to-move
-    if (idx === null) return;
-    if (selected !== null && legalTargets.has(idx)) {
-      const moves = getSquareLegalMoves(state, selected);
-      const move =
-        moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
-        moves.find(m => m.to === idx);
-      if (move) {
-        selected = null;
-        legalTargets = new Set();
-        if (onMove) { onMove(move.san); return; }
-        state = applyMove(state, move.san);
-      } else {
-        selected = null;
-        legalTargets = new Set();
-      }
-    } else {
-      const piece = state.board[idx];
-      if (piece && piece.color === state.activeColor) {
-        selected = idx;
-        legalTargets = new Set(getSquareLegalMoves(state, idx).map(m => m.to));
-      } else {
-        selected = null;
-        legalTargets = new Set();
-      }
-    }
-    render();
-  });
-
-  // Right-drag arrow drawing
-  wrapper.addEventListener("pointerdown", (e) => {
-    if (e.button !== 2) return;
-    rightDragStart = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
-  });
-
-  wrapper.addEventListener("pointerup", async (e) => {
-    if (e.button !== 2) return;
-    const end = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
-    const start = rightDragStart;
-    rightDragStart = null;
-    if (start === null || end === null) return;
-
-    if (start === end) {
-      // Same square: remove any arrows originating from this square
-      userArrows = userArrows.filter(a => a.from !== start);
-      render();
-      return;
-    }
-
-    // Toggle: if this exact arrow already exists, remove it; otherwise add it
-    const existing = userArrows.findIndex(a => a.from === start && a.to === end);
-    if (existing !== -1) {
-      userArrows.splice(existing, 1);
-      render();
-      return;
-    }
-
-    // Draw the arrow first, then ask for an optional comment
-    userArrows.push({ from: start, to: end, color: USER_ARROW_COLOR });
-    render();
-
-    const label = await promptArrowLabel(start, end);
-    if (label) {
-      userArrows[userArrows.length - 1].label = label;
-      render();
-    }
-  });
-
-  wrapper.addEventListener("contextmenu", (e) => e.preventDefault());
-
-  render();
-  return {
-    getState: () => state,
-    setState: (s: BoardState, lm?: { from: number; to: number }) => { state = s; lastMove = lm; selected = null; legalTargets = new Set(); render(); },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Viewer position cache
 // When write-back triggers a re-render, the new block processor call restores
@@ -449,28 +144,6 @@ function mountInteractiveBoard(
 // ---------------------------------------------------------------------------
 
 const viewerPositionCache = new Map<string, string[]>();
-
-function nodeToPath(node: MoveNode): string[] {
-  const path: string[] = [];
-  let cur: MoveNode | null = node;
-  while (cur !== null && cur.san !== null) {
-    path.unshift(cur.san);
-    cur = cur.parent;
-  }
-  return path;
-}
-
-function pathToNode(root: MoveNode, path: string[]): MoveNode {
-  let cur = root;
-  for (const san of path) {
-    const next = cur.next?.san === san
-      ? cur.next
-      : cur.next?.variationHeads.find(v => v.san === san);
-    if (!next) break;
-    cur = next;
-  }
-  return cur;
-}
 
 // ---------------------------------------------------------------------------
 // PGN write-back
@@ -504,250 +177,16 @@ async function writeBackPgn(
 }
 
 // ---------------------------------------------------------------------------
-// Piece move animation overlay
+// PgnViewerChild — Obsidian lifecycle wrapper
 // ---------------------------------------------------------------------------
 
-function animatePieceOverlay(
-  wrapper: HTMLElement,
-  move: { from: number; to: number },
-  config: BoardConfig,
-  pieceUrl: string,
-  onDone?: () => void,
-): () => void {
-  const { squareSize, orientation } = config;
-  const boardSize = squareSize * 8;
-
-  function toPercent(idx: number): { left: string; top: string } {
-    const rank = 7 - Math.floor(idx / 8);
-    const file = idx % 8;
-    const col = orientation === "white" ? file : 7 - file;
-    const row = orientation === "white" ? 7 - rank : rank;
-    return {
-      left: `${(col / 8) * 100}%`,
-      top:  `${(row / 8) * 100}%`,
-    };
+class PgnViewerChild extends MarkdownRenderChild {
+  constructor(containerEl: HTMLElement, private viewer: PgnViewer) {
+    super(containerEl);
   }
-
-  const size = `${(squareSize / boardSize) * 100}%`;
-  const from = toPercent(move.from);
-  const to   = toPercent(move.to);
-
-  const img = document.createElement("img");
-  img.src = pieceUrl;
-  img.className = "chess-piece-anim";
-  img.style.width  = size;
-  img.style.height = size;
-  img.style.left   = from.left;
-  img.style.top    = from.top;
-
-  wrapper.appendChild(img);
-
-  // Force layout so the starting position is painted before we apply the transition target.
-  img.getBoundingClientRect();
-
-  img.style.left = to.left;
-  img.style.top  = to.top;
-
-  let finished = false;
-  function finish() {
-    if (finished) return;
-    finished = true;
-    img.remove();
-    onDone?.();
+  onunload(): void {
+    this.viewer.destroy();
   }
-
-  img.addEventListener("transitionend", finish, { once: true });
-  const timer = setTimeout(finish, 400);
-
-  return function cancel() {
-    clearTimeout(timer);
-    finished = true;
-    img.remove();
-  };
-}
-
-// ---------------------------------------------------------------------------
-// PGN viewer — DOM-stable mount
-// ---------------------------------------------------------------------------
-
-interface PgnViewerHandle {
-  /** Re-render nav + move list (and board if arrows supplied) for a new current node. */
-  update(current: MoveNode, arrows?: EngineArrow[]): void;
-  /** Swap in a completely new tree (e.g. game-selector change). */
-  reset(newRoot: MoveNode, newResult: string): void;
-}
-
-function mountPgnViewer(
-  container: HTMLElement,
-  initialRoot: MoveNode,
-  initialCurrent: MoveNode,
-  config: BoardConfig,
-  result: string,
-  onNavigate: (node: MoveNode) => void,
-): PgnViewerHandle {
-  let root = initialRoot;
-  let current = initialCurrent;
-  let currentResult = result;
-  let pendingAnimation: { from: number; to: number } | undefined;
-  let cancelHoverAnim: (() => void) | undefined;
-
-  // ── Stable DOM skeleton ──────────────────────────────────────────────────
-  const viewerDiv  = container.createDiv({ cls: "chess-viewer" });
-  const boardWrapperEl = viewerDiv.createDiv({ cls: "chess-board-wrapper" });
-  const navEl      = viewerDiv.createDiv({ cls: "chess-nav" });
-  const prevBtn    = navEl.createEl("button", { text: "←" });
-  const nextBtn    = navEl.createEl("button", { text: "→" });
-  const turnIndicatorEl = viewerDiv.createDiv({ cls: "chess-turn-indicator" });
-  const moveListEl = viewerDiv.createDiv({ cls: "chess-move-list-container" });
-
-  // ── Interactive board (owns board rendering and pointer events) ──────────
-  const boardInteraction = mountInteractiveBoard(
-    boardWrapperEl,
-    initialCurrent.state,
-    config,
-    undefined,
-    (san) => {
-      const { state: newState, from, to } = applyMoveEx(current.state, san);
-      const newNode = attachMove(current, san, newState, from, to);
-      current = newNode;
-      pendingAnimation = { from, to };
-      onNavigate(current);
-    },
-  );
-
-  // ── Nav / move-list event listeners — attached once ──────────────────────
-  prevBtn.addEventListener("click", () => {
-    if (current.parent) {
-      // Animate the moved piece sliding back (reverse direction).
-      if (current.from >= 0) pendingAnimation = { from: current.to, to: current.from };
-      current = current.parent;
-      onNavigate(current);
-    }
-  });
-  nextBtn.addEventListener("click", () => {
-    if (current.next) {
-      current = current.next;
-      if (current.from >= 0) pendingAnimation = { from: current.from, to: current.to };
-      onNavigate(current);
-    }
-  });
-
-  // Hover preview: show the hovered move's position with a slide animation.
-  moveListEl.addEventListener("mouseover", (e: MouseEvent) => {
-    const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
-    if (!token) return;
-    const id = parseInt(token.dataset.nodeId ?? "-1", 10);
-    const found = findNodeById(root, id);
-    if (!found || found === current) return;
-
-    cancelHoverAnim?.();
-    cancelHoverAnim = undefined;
-
-    const lm = found.from >= 0 ? { from: found.from, to: found.to } : undefined;
-    if (found.from >= 0) {
-      boardWrapperEl.innerHTML = renderBoard(found.state, { ...config, lastMove: lm, animatedMove: lm });
-      const piece = found.state.board[found.to];
-      if (piece) {
-        cancelHoverAnim = animatePieceOverlay(boardWrapperEl, lm!, config, config.resolvePieceUrl(piece), () => {
-          boardWrapperEl.querySelector<SVGImageElement>("#chess-anim-dest")?.removeAttribute("opacity");
-        });
-      }
-    } else {
-      boardInteraction.setState(found.state, lm);
-    }
-  });
-
-  moveListEl.addEventListener("mouseleave", () => {
-    cancelHoverAnim?.();
-    cancelHoverAnim = undefined;
-    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
-    boardInteraction.setState(current.state, lm);
-  });
-
-  // Delegated listener on the stable container — survives innerHTML swaps.
-  moveListEl.addEventListener("click", (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-
-    // Promote-variation button
-    const promoteBtn = target.closest<HTMLElement>("[data-promote-id]");
-    if (promoteBtn) {
-      const id = parseInt(promoteBtn.dataset.promoteId ?? "-1", 10);
-      const varHead = findNodeById(root, id);
-      if (varHead) {
-        promoteVariation(varHead);
-        onNavigate(current);
-      }
-      return;
-    }
-
-    // Move token navigation
-    const token = target.closest<HTMLElement>("[data-node-id]");
-    if (!token) return;
-    const id = parseInt(token.dataset.nodeId ?? "-1", 10);
-    const found = findNodeById(root, id);
-    if (found) {
-      current = found;
-      if (current.from >= 0) pendingAnimation = { from: current.from, to: current.to };
-      onNavigate(current);
-    }
-  });
-
-  // ── Update helpers ───────────────────────────────────────────────────────
-  function updateNav(node: MoveNode): void {
-    prevBtn.disabled = !node.parent;
-    nextBtn.disabled = !node.next;
-  }
-
-  function updateMoveList(node: MoveNode): void {
-    moveListEl.innerHTML = buildMoveListHtml(root, node.id, currentResult);
-  }
-
-  function updateTurnIndicator(node: MoveNode): void {
-    const color = node.state.activeColor;
-    turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
-    turnIndicatorEl.setText(color === "w" ? "White to move" : "Black to move");
-  }
-
-  function update(node: MoveNode, arrows?: EngineArrow[]): void {
-    current = node;
-    const lm = node.from >= 0 ? { from: node.from, to: node.to } : undefined;
-    const animated = pendingAnimation;
-    pendingAnimation = undefined;
-    if (arrows?.length) {
-      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, lastMove: lm, engineArrows: arrows });
-    } else if (animated) {
-      // Render board with the destination piece hidden, then slide an overlay onto it.
-      // After the animation, hand control back to boardInteraction so pointer events work.
-      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, lastMove: lm, animatedMove: animated });
-      const piece = node.state.board[animated.to];
-      if (piece) {
-        animatePieceOverlay(boardWrapperEl, animated, config, config.resolvePieceUrl(piece), () => {
-          boardInteraction.setState(node.state, lm);
-        });
-      } else {
-        boardInteraction.setState(node.state, lm);
-      }
-    } else {
-      boardInteraction.setState(node.state, lm);
-    }
-    updateNav(node);
-    updateTurnIndicator(node);
-    updateMoveList(node);
-  }
-
-  function reset(newRoot: MoveNode, newResult: string): void {
-    root = newRoot;
-    currentResult = newResult;
-    current = newRoot;
-    update(newRoot);
-  }
-
-  // Initial nav + move list (board already rendered by mountInteractiveBoard)
-  updateNav(initialCurrent);
-  updateTurnIndicator(initialCurrent);
-  updateMoveList(initialCurrent);
-
-  return { update, reset };
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,22 +452,26 @@ export default class ChessPlugin extends Plugin {
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
-          let root: MoveNode = buildMoveTree(startFen, games[0].moves);
+          const root: MoveNode = buildMoveTree(startFen, games[0].moves);
 
           // Restore position saved before a write-back re-render
           const sectionInfo = ctx.getSectionInfo(el);
           const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
           const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
-          let current: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
+          const initialCurrent: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
 
           const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
           const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
 
-          let analysisReset: (() => void) | null = null;
-
           // Game selector — only shown when the PGN contains more than one game
           if (games.length > 1) {
             const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
+            if (games.length > 1) {
+              selectorDiv.createEl("p", {
+                text: "Editing is disabled for multi-game PGN files.",
+                cls: "chess-multigame-notice",
+              });
+            }
             const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
             games.forEach((g: PgnGame, i: number) => {
               const opt = select.createEl("option", { value: String(i), text: gameLabel(g, i) });
@@ -1036,42 +479,47 @@ export default class ChessPlugin extends Plugin {
             });
             select.addEventListener("change", () => {
               gameIndex = parseInt(select.value, 10);
-              root = buildMoveTree(startFen, games[gameIndex].moves);
-              current = root;
-              analysisReset?.();
-              viewer.reset(root, games[gameIndex].result);
+              const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
+              viewer.loadGame(newRoot, games[gameIndex].result);
             });
           }
 
           const app = this.app;
-          const viewer = mountPgnViewer(
-            wrapper,
-            root,
-            current,
-            baseConfig,
-            games[gameIndex].result,
-            (node) => {
-              current = node;
-              if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(node));
-              analysisReset?.();
-              viewer.update(node);
-              if (games.length === 1) {
-                writeBackPgn(app, ctx, el, serializeMoveTree(root, games[0].result));
-              }
-            },
-          );
+          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result);
+          viewer.mount();
+
+          // Position cache listener
+          viewer.onChange((e) => {
+            if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
+          });
+
+          // Write-back listener (single game only, tree mutations only)
+          viewer.onChange((e) => {
+            if (e.reason !== "move" && e.reason !== "promote") return;
+            if (games.length !== 1) return;
+            writeBackPgn(app, ctx, el, serializeMoveTree(e.root, games[0].result));
+          });
+
+          let analysisReset: (() => void) | null = null;
+
+          // Analysis reset on game change
+          viewer.onChange((e) => {
+            if (e.reason === "load-game") analysisReset?.();
+          });
 
           if (params.analysis) {
             const { reset } = mountAnalysisPanel(
               outerContainer,
               null,
-              () => current.state,
+              () => viewer.getCurrentState(),
               baseConfig,
               this.getEngineWorker.bind(this),
-              (arrows) => { viewer.update(current, arrows); }
+              (arrows) => { viewer.setEngineArrows(arrows); }
             );
             analysisReset = reset;
           }
+
+          ctx.addChild(new PgnViewerChild(el, viewer));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           el.createEl("pre", { text: `Chess error: ${msg}`, cls: "chess-error" });
