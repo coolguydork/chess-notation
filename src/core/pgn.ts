@@ -16,8 +16,9 @@ type Token =
 
 // SAN: castling, pawn moves, piece moves — with optional disambiguation,
 // capture, promotion, and check/checkmate suffixes.
+// Also matches null moves: -- (PGN standard) and Z0 (ChessBase).
 const SAN_RE =
-  /^(?:O-O-O|O-O|[NBRQK][a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQK])?[+#]?|[a-h](?:[1-8]|x[a-h][1-8](?:=[NBRQK])?)(?:=[NBRQK])?[+#]?)[!?]*/;
+  /^(?:--|Z0|O-O-O|O-O|[NBRQK][a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQK])?[+#]?|[a-h](?:[1-8]|x[a-h][1-8](?:=[NBRQK])?)(?:=[NBRQK])?[+#]?)[!?]*/;
 
 function tokenise(input: string): Token[] {
   const tokens: Token[] = [];
@@ -47,9 +48,10 @@ function tokenise(input: string): Token[] {
       const end = src.indexOf("}", i);
       if (end === -1) throw new Error("PGN: unclosed comment");
       const raw = src.slice(i + 1, end);
-      // Trim leading/trailing whitespace (but preserve internal newlines, then trim each edge)
-      const trimmed = raw.replace(/^[\s\n]+/, "").replace(/[\s\n]+$/, "");
-      tokens.push({ type: "comment", value: trimmed });
+      // Strip embedded clock/eval/time annotations ("[%clk ...]", "[%eval ...]", etc.)
+      // then normalise whitespace and trim.
+      const stripped = raw.replace(/\[%[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+      if (stripped) tokens.push({ type: "comment", value: stripped });
       i = end + 1;
       continue;
     }
@@ -256,4 +258,45 @@ export function parsePGN(input: string): PgnGame {
   consume(ps);
 
   return { headers, moves, result: resultToken.value };
+}
+
+// ---------------------------------------------------------------------------
+// parseMultiPGN — parse a PGN string that may contain more than one game.
+// Returns an array of PgnGame objects (one element for a single-game string).
+// ---------------------------------------------------------------------------
+
+export function parseMultiPGN(input: string): PgnGame[] {
+  if (!input.trim()) throw new Error("PGN: input is empty");
+
+  const tokens = tokenise(input);
+  const ps: ParserState = { tokens, pos: 0 };
+  const games: PgnGame[] = [];
+
+  while (ps.pos < ps.tokens.length) {
+    // Headers
+    const headers: Record<string, string> = {};
+    while (peek(ps)?.type === "header") {
+      const t = consume(ps) as Extract<Token, { type: "header" }>;
+      headers[t.key] = t.value;
+    }
+
+    if (ps.pos >= ps.tokens.length) break;
+
+    // Move list
+    const moves = parseMoveList(ps, "w", 1);
+
+    // Result
+    const resultToken = peek(ps);
+    if (!resultToken || resultToken.type !== "result") {
+      throw new Error(
+        `PGN: game ${games.length + 1}: missing result token (expected 1-0, 0-1, 1/2-1/2, or *)`
+      );
+    }
+    consume(ps);
+
+    games.push({ headers, moves, result: resultToken.value });
+  }
+
+  if (games.length === 0) throw new Error("PGN: no games found");
+  return games;
 }

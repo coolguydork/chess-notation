@@ -308,4 +308,51 @@ describe("applyMove", () => {
       expect(() => applyMove(parseFEN(fen), "Nc3")).toThrow();
     });
   });
+
+  describe("null moves", () => {
+    it("-- flips active color from white to black", () => {
+      const s = applyMove(parseFEN(STARTING_FEN), "--");
+      expect(s.activeColor).toBe("b");
+    });
+
+    it("Z0 flips active color from white to black", () => {
+      const s = applyMove(parseFEN(STARTING_FEN), "Z0");
+      expect(s.activeColor).toBe("b");
+    });
+
+    it("-- flips active color from black to white", () => {
+      const blackToMove = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+      const s = applyMove(parseFEN(blackToMove), "--");
+      expect(s.activeColor).toBe("w");
+    });
+
+    it("-- clears en passant square", () => {
+      // After 1. e4, en passant is e3
+      const withEp = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+      const s = applyMove(parseFEN(withEp), "--");
+      expect(s.enPassant).toBeNull();
+    });
+
+    it("-- does not move any piece on the board", () => {
+      const before = parseFEN(STARTING_FEN);
+      const after = applyMove(before, "--");
+      expect(after.board).toEqual(before.board);
+    });
+
+    it("-- increments halfmove clock", () => {
+      const s = applyMove(parseFEN(STARTING_FEN), "--");
+      expect(s.halfmoveClock).toBe(1);
+    });
+
+    it("-- increments fullmove number when black passes", () => {
+      const blackToMove = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+      const s = applyMove(parseFEN(blackToMove), "--");
+      expect(s.fullmoveNumber).toBe(2);
+    });
+
+    it("-- does not increment fullmove number when white passes", () => {
+      const s = applyMove(parseFEN(STARTING_FEN), "--");
+      expect(s.fullmoveNumber).toBe(1);
+    });
+  });
 });

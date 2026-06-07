@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePGN } from "../../src/core/pgn";
+import { parsePGN, parseMultiPGN } from "../../src/core/pgn";
 import type { PgnGame } from "../../src/core/types";
 
 describe("parsePGN", () => {
@@ -129,9 +129,9 @@ describe("parsePGN", () => {
       expect(game.moves[0].comment).toBe("spaces");
     });
 
-    it("handles multiline comments", () => {
+    it("handles multiline comments (whitespace normalised to spaces)", () => {
       const game = parsePGN("1. e4 {\nLine one\nLine two\n} *");
-      expect(game.moves[0].comment).toBe("Line one\nLine two");
+      expect(game.moves[0].comment).toBe("Line one Line two");
     });
   });
 
@@ -239,5 +239,105 @@ describe("parsePGN", () => {
     it("throws when result token is missing", () => {
       expect(() => parsePGN("1. e4 e5")).toThrow();
     });
+  });
+
+  describe("clock/eval annotation stripping", () => {
+    it("strips [%clk ...] from comment text", () => {
+      const game = parsePGN("1. e4 { [%clk 1:30:00] } e5 *");
+      // comment is purely a clock annotation → no comment token emitted
+      expect(game.moves[0].comment).toBeUndefined();
+    });
+
+    it("strips [%eval ...] and keeps surrounding text", () => {
+      const game = parsePGN("1. e4 { [%eval +0.54] Good move } e5 *");
+      expect(game.moves[0].comment).toBe("Good move");
+    });
+
+    it("strips multiple annotations from one comment", () => {
+      const game = parsePGN("1. e4 { [%clk 1:00:00][%eval +0.3] Solid opening } e5 *");
+      expect(game.moves[0].comment).toBe("Solid opening");
+    });
+
+    it("preserves comments that contain no annotations", () => {
+      const game = parsePGN("1. e4 { This is fine } e5 *");
+      expect(game.moves[0].comment).toBe("This is fine");
+    });
+
+    it("strips any [%xxx ...] pattern regardless of command name", () => {
+      const game = parsePGN("1. e4 { [%emt 0:00:03][%mct 1:00:00] } e5 *");
+      expect(game.moves[0].comment).toBeUndefined();
+    });
+  });
+
+  describe("null moves", () => {
+    it("parses -- as a san token", () => {
+      const game = parsePGN("1. e4 e5 2. -- Nc6 *");
+      expect(game.moves[2].san).toBe("--");
+      expect(game.moves[2].moveNumber).toBe(2);
+      expect(game.moves[2].color).toBe("w");
+    });
+
+    it("parses Z0 as a san token", () => {
+      const game = parsePGN("1. e4 e5 2. Z0 Nc6 *");
+      expect(game.moves[2].san).toBe("Z0");
+    });
+
+    it("null move in a variation", () => {
+      const game = parsePGN("1. e4 (1. -- e5) e5 *");
+      expect(game.moves[0].variations![0][0].san).toBe("--");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseMultiPGN
+// ---------------------------------------------------------------------------
+
+describe("parseMultiPGN", () => {
+  const twoGames = `[White "Alice"][Black "Bob"][Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 1-0
+
+[White "Carol"][Black "Dave"][Result "0-1"]
+
+1. d4 d5 2. c4 e6 0-1`;
+
+  it("returns a single game for ordinary PGN", () => {
+    const games = parseMultiPGN("1. e4 e5 *");
+    expect(games).toHaveLength(1);
+    expect(games[0].moves[0].san).toBe("e4");
+  });
+
+  it("parses two games and preserves headers for each", () => {
+    const games = parseMultiPGN(twoGames);
+    expect(games).toHaveLength(2);
+    expect(games[0].headers["White"]).toBe("Alice");
+    expect(games[1].headers["White"]).toBe("Carol");
+  });
+
+  it("parses moves for each game independently", () => {
+    const games = parseMultiPGN(twoGames);
+    expect(games[0].moves[0].san).toBe("e4");
+    expect(games[1].moves[0].san).toBe("d4");
+  });
+
+  it("records the correct result for each game", () => {
+    const games = parseMultiPGN(twoGames);
+    expect(games[0].result).toBe("1-0");
+    expect(games[1].result).toBe("0-1");
+  });
+
+  it("handles three or more games", () => {
+    const three = "1. e4 * \n 1. d4 * \n 1. c4 *";
+    expect(parseMultiPGN(three)).toHaveLength(3);
+  });
+
+  it("throws on empty input", () => {
+    expect(() => parseMultiPGN("")).toThrow();
+  });
+
+  it("throws when a game is missing its result token before the next header block", () => {
+    // The header signals a new game; the first game has no result before it
+    expect(() => parseMultiPGN('[White "Carol"]\n1. e4 e5\n[White "Dave"]\n1. d4 d5 *')).toThrow();
   });
 });

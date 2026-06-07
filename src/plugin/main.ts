@@ -1,7 +1,7 @@
 import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
-import { parsePGN } from "../core/pgn";
+import { parseMultiPGN } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
 import { buildMoveTree, findNodeById, renderControls } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
@@ -17,7 +17,7 @@ import {
 } from "../render/config";
 import { scoreToString } from "../core/engine";
 import { EngineWorker } from "./engine-worker";
-import type { Piece, BoardState, MoveNode } from "../core/types";
+import type { Piece, BoardState, MoveNode, PgnGame } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -142,6 +142,18 @@ function squareFromEvent(
   const file = orientation === "white" ? col : 7 - col;
   const rank = orientation === "white" ? 7 - row : row;
   return (7 - rank) * 8 + file;
+}
+
+// Build a human-readable label for a game in a multi-game selector.
+function gameLabel(game: PgnGame, index: number): string {
+  const w = game.headers["White"];
+  const b = game.headers["Black"];
+  if (w && b) {
+    const round = game.headers["Round"];
+    const prefix = round && round !== "?" && round !== "-" ? `R${round} · ` : "";
+    return `${prefix}${w} – ${b}`;
+  }
+  return `Game ${index + 1}`;
 }
 
 const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
@@ -555,20 +567,44 @@ export default class ChessPlugin extends Plugin {
             return;
           }
 
-          // PGN viewer with move navigation (supports variation branches)
-          const game = parsePGN(params.pgn!);
+          // PGN viewer — supports single and multi-game PGN, variation branches,
+          // NAG symbols, and inline annotations.
+          const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
-          const root = buildMoveTree(startFen, game.moves);
+          let gameIndex = 0;
+          let root = buildMoveTree(startFen, games[0].moves);
           let current: MoveNode = root;
           const wrapper = el.createDiv({ cls: "chess-viewer-wrapper" });
 
           function render(): void {
-            wrapper.innerHTML = renderControls(root, current, baseConfig, game.result);
-            attachHandlers();
+            wrapper.innerHTML = "";
+
+            // Game selector — only shown when the PGN contains more than one game
+            if (games.length > 1) {
+              const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
+              const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
+              games.forEach((g: PgnGame, i: number) => {
+                const opt = select.createEl("option", {
+                  value: String(i),
+                  text: gameLabel(g, i),
+                });
+                if (i === gameIndex) opt.selected = true;
+              });
+              select.addEventListener("change", () => {
+                gameIndex = parseInt(select.value, 10);
+                root = buildMoveTree(startFen, games[gameIndex].moves);
+                current = root;
+                render();
+              });
+            }
+
+            const viewerDiv = wrapper.createDiv();
+            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result);
+            attachHandlers(viewerDiv);
           }
 
-          function attachHandlers(): void {
-            wrapper.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
+          function attachHandlers(viewerDiv: HTMLElement): void {
+            viewerDiv.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
               btn.addEventListener("click", () => {
                 const action = btn.dataset.action;
                 if (action === "prev" && current.parent) { current = current.parent; render(); }
@@ -576,7 +612,7 @@ export default class ChessPlugin extends Plugin {
               });
             });
 
-            wrapper.querySelectorAll<HTMLElement>("[data-node-id]").forEach((token) => {
+            viewerDiv.querySelectorAll<HTMLElement>("[data-node-id]").forEach((token) => {
               token.addEventListener("click", () => {
                 const id = parseInt(token.dataset.nodeId ?? "-1", 10);
                 const found = findNodeById(root, id);

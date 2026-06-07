@@ -205,6 +205,17 @@ const CASTLING_SQUARE_RIGHTS: Record<number, keyof CastlingRights> = {
 // ---------------------------------------------------------------------------
 
 export function applyMove(state: BoardState, san: string): BoardState {
+  // Null move (-- or Z0): pass the turn without moving a piece.
+  if (san === "--" || san === "Z0") {
+    return {
+      ...state,
+      activeColor: state.activeColor === "w" ? "b" : "w",
+      enPassant: null,
+      halfmoveClock: state.halfmoveClock + 1,
+      fullmoveNumber: state.fullmoveNumber + (state.activeColor === "b" ? 1 : 0),
+    };
+  }
+
   const parsed = parseSan(san);
   const { board, activeColor } = state;
 
