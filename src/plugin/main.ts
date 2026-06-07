@@ -213,7 +213,9 @@ function mountAnalysisPanel(
   baseConfig: BoardConfig,
   getWorker: () => EngineWorker,
   onArrows?: (arrows: EngineArrow[]) => void,
-  onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void
+  onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void,
+  onPreview?: (state: BoardState, from: number, to: number) => void,
+  onEndPreview?: () => void,
 ): { reset: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
   const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyze-btn" });
@@ -268,11 +270,13 @@ function mountAnalysisPanel(
           : "chess-analysis-score";
         row.createSpan({ text: scoreToString(move.score), cls: scoreClass });
         const pvEl = row.createSpan({ cls: "chess-analysis-pv" });
+        if (onEndPreview) pvEl.addEventListener("pointerleave", () => onEndPreview());
         for (const [j, pvMove] of pvMoves.entries()) {
           const btn = pvEl.createEl("button", {
             text: pvMove.san,
             cls: j === 0 ? "chess-pv-move chess-pv-move--best" : "chess-pv-move",
           });
+          if (onPreview) btn.addEventListener("pointerenter", () => onPreview(pvMove.state, pvMove.from, pvMove.to));
           if (onGraftLine) {
             btn.addEventListener("click", () => onGraftLine(pvMoves, j));
           } else {
@@ -567,10 +571,16 @@ export default class ChessPlugin extends Plugin {
             const boardWrapper = container.createDiv({ cls: "chess-board" });
             const turnEl = container.createDiv({ cls: `chess-turn-indicator chess-turn-indicator--${state.activeColor}` });
             turnEl.setText(state.activeColor === "w" ? "White to move" : "Black to move");
-            const { getState } = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
+            const board = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
+            const { getState } = board;
 
             if (params.analysis) {
-              mountAnalysisPanel(container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this));
+              mountAnalysisPanel(
+                container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this),
+                undefined, undefined,
+                (s, from, to) => board.animatedPreview(s, from, to),
+                () => board.endPreview(),
+              );
             }
             return;
           }
@@ -645,7 +655,9 @@ export default class ChessPlugin extends Plugin {
               (arrows) => { viewer.setEngineArrows(arrows); },
               (pvMoves, upToIndex) => {
                 viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
-              }
+              },
+              (s, from, to) => viewer.previewEngineMove(s, from, to),
+              () => viewer.endEnginePreview(),
             );
             analysisReset = reset;
           }

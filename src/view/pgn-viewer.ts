@@ -266,6 +266,17 @@ export class PgnViewer {
     this.board.setEngineArrows(arrows);
   }
 
+  previewEngineMove(state: BoardState, from: number, to: number): void {
+    this.cancelHoverAnim?.();
+    this.cancelHoverAnim = this.board.animatedPreview(state, from, to);
+  }
+
+  endEnginePreview(): void {
+    this.cancelHoverAnim?.();
+    this.cancelHoverAnim = null;
+    this.board.endPreview();
+  }
+
   loadGame(root: MoveNode, result: string): void {
     this.board.endPreview();
     this.cancelAnim?.();
