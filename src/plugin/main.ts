@@ -64,10 +64,11 @@ interface ChessBlockParams {
 }
 
 function parseBlock(source: string): ChessBlockParams {
-  const parsed = parseYaml(source) as Record<string, unknown>;
-  if (!parsed || typeof parsed !== "object") {
+  const raw = parseYaml(source);
+  if (raw !== null && raw !== undefined && typeof raw !== "object") {
     throw new Error("Chess block: expected a YAML mapping");
   }
+  const parsed = (raw ?? {}) as Record<string, unknown>;
 
   const params: ChessBlockParams = {};
 
@@ -96,7 +97,7 @@ function parseBlock(source: string): ChessBlockParams {
   params.analysis = "analysis" in parsed ? Boolean(parsed.analysis) : true;
 
   if (!params.fen && !params.pgn) {
-    throw new Error("Chess block: 'fen' or 'pgn' is required");
+    params.fen = STARTING_FEN;
   }
 
   return params;
