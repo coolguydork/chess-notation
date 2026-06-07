@@ -49,7 +49,9 @@ function buildLine(parentNode: MoveNode, pgnMoves: PgnMove[]): void {
     // m.variations are alternatives to m — they branch from cur (m's parent).
     // Attach each as a variationHead on node (displayed right after node).
     for (const varLine of (m.variations ?? [])) {
-      if (varLine.length > 0) attachVariation(cur, varLine, node);
+      if (varLine.length > 0) {
+        try { attachVariation(cur, varLine, node); } catch { /* skip invalid variation */ }
+      }
     }
 
     cur = node;

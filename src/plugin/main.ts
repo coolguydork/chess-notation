@@ -93,9 +93,7 @@ function parseBlock(source: string): ChessBlockParams {
     params.theme = parsed.theme;
   }
 
-  if ("analysis" in parsed) {
-    params.analysis = Boolean(parsed.analysis);
-  }
+  params.analysis = "analysis" in parsed ? Boolean(parsed.analysis) : true;
 
   if (!params.fen && !params.pgn) {
     throw new Error("Chess block: 'fen' or 'pgn' is required");

@@ -74,6 +74,7 @@ The block body is YAML. Supported keys:
 - `pgn` — PGN string (required if no `fen`)
 - `orientation` — `white` | `black` (default: `white`)
 - `theme` — board color theme name (default: plugin setting); see themes below
+- `analysis` — show the engine analysis panel (default: `true`; set to `false` to hide)
 
 `fen` and `pgn` may be combined: `fen` sets the starting position, `pgn`
 provides the move list to navigate.
