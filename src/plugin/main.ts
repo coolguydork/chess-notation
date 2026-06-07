@@ -216,7 +216,7 @@ function mountAnalysisPanel(
   onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void
 ): { reset: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
-  const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyse-btn" });
+  const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyze-btn" });
   const output = panel.createDiv({ cls: "chess-analysis-output" });
 
   function reset(): void {
@@ -233,7 +233,7 @@ function mountAnalysisPanel(
     try {
       const worker = getWorker();
       const state = getState();
-      const result = await worker.analyse(state, []);
+      const result = await worker.analyze(state, []);
 
       const arrows: EngineArrow[] = result.moves.map((m, i) =>
         uciToArrow(m.uci, ARROW_COLORS[i] ?? ARROW_COLORS[ARROW_COLORS.length - 1])
@@ -282,7 +282,7 @@ function mountAnalysisPanel(
         row.createSpan({ text: `d${move.depth}`, cls: "chess-analysis-depth" });
       }
 
-      btn.textContent = "Re-analyse";
+      btn.textContent = "Re-analyze";
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       output.createEl("p", { text: `Engine error: ${msg}`, cls: "chess-engine-error" });
@@ -398,7 +398,7 @@ class ChessSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Lines shown (MultiPV)")
-      .setDesc("Number of top moves to display when analysing a position.")
+      .setDesc("Number of top moves to display when analyzing a position.")
       .addSlider((slider) => {
         slider
           .setLimits(1, 5, 1)

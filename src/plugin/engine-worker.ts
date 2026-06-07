@@ -303,8 +303,8 @@ export class EngineWorker {
     return engine;
   }
 
-  /** Analyse a position. Resolves with the best lines found at the configured depth. */
-  async analyse(state: BoardState, history: string[]): Promise<AnalysisResult> {
+  /** Analyze a position. Resolves with the best lines found at the configured depth. */
+  async analyze(state: BoardState, history: string[]): Promise<AnalysisResult> {
     const { depth, multiPV, userOptions } = this.config;
     const session = buildUciCommands(state, history, depth, multiPV, userOptions);
 
