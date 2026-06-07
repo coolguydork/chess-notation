@@ -3,7 +3,7 @@ import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parseMultiPGN } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildMoveTree, findNodeById, renderControls } from "../render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
 import {
@@ -420,6 +420,92 @@ function mountInteractiveBoard(
 }
 
 // ---------------------------------------------------------------------------
+// PGN viewer — DOM-stable mount
+// ---------------------------------------------------------------------------
+
+interface PgnViewerHandle {
+  /** The stable board wrapper element — chunk 2b will mount interactive events here. */
+  boardWrapperEl: HTMLElement;
+  /** Re-render board + nav + move list for a new current node. */
+  update(current: MoveNode, arrows?: EngineArrow[]): void;
+  /** Swap in a completely new tree (e.g. game-selector change). */
+  reset(newRoot: MoveNode, newResult: string): void;
+}
+
+function mountPgnViewer(
+  container: HTMLElement,
+  initialRoot: MoveNode,
+  initialCurrent: MoveNode,
+  config: BoardConfig,
+  result: string,
+  onNavigate: (node: MoveNode) => void,
+): PgnViewerHandle {
+  let root = initialRoot;
+  let current = initialCurrent;
+  let currentResult = result;
+
+  // ── Stable DOM skeleton ──────────────────────────────────────────────────
+  const viewerDiv    = container.createDiv({ cls: "chess-viewer" });
+  const boardWrapperEl = viewerDiv.createDiv({ cls: "chess-board-wrapper" });
+  const navEl        = viewerDiv.createDiv({ cls: "chess-nav" });
+  const prevBtn      = navEl.createEl("button", { text: "←" });
+  const nextBtn      = navEl.createEl("button", { text: "→" });
+  const moveListEl   = viewerDiv.createDiv({ cls: "chess-move-list-container" });
+
+  // ── Event listeners — attached once ─────────────────────────────────────
+  prevBtn.addEventListener("click", () => {
+    if (current.parent) { current = current.parent; onNavigate(current); }
+  });
+  nextBtn.addEventListener("click", () => {
+    if (current.next) { current = current.next; onNavigate(current); }
+  });
+
+  // Delegated listener — survives move-list innerHTML swaps because it sits
+  // on the stable container above the swapped content.
+  moveListEl.addEventListener("click", (e: MouseEvent) => {
+    const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
+    if (!token) return;
+    const id = parseInt(token.dataset.nodeId ?? "-1", 10);
+    const found = findNodeById(root, id);
+    if (found) { current = found; onNavigate(current); }
+  });
+
+  // ── Update helpers ───────────────────────────────────────────────────────
+  function updateBoard(node: MoveNode, arrows?: EngineArrow[]): void {
+    const cfg: BoardConfig = arrows?.length ? { ...config, engineArrows: arrows } : config;
+    boardWrapperEl.innerHTML = renderBoard(node.state, cfg);
+  }
+
+  function updateNav(node: MoveNode): void {
+    prevBtn.disabled = !node.parent;
+    nextBtn.disabled = !node.next;
+  }
+
+  function updateMoveList(node: MoveNode): void {
+    moveListEl.innerHTML = buildMoveListHtml(root, node.id, currentResult);
+  }
+
+  function update(node: MoveNode, arrows?: EngineArrow[]): void {
+    current = node;
+    updateBoard(node, arrows);
+    updateNav(node);
+    updateMoveList(node);
+  }
+
+  function reset(newRoot: MoveNode, newResult: string): void {
+    root = newRoot;
+    currentResult = newResult;
+    current = newRoot;
+    update(newRoot);
+  }
+
+  // Initial render
+  update(initialCurrent);
+
+  return { boardWrapperEl, update, reset };
+}
+
+// ---------------------------------------------------------------------------
 // Analysis panel
 // ---------------------------------------------------------------------------
 
@@ -682,62 +768,42 @@ export default class ChessPlugin extends Plugin {
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
-          let root = buildMoveTree(startFen, games[0].moves);
-          let current: MoveNode = root;
+          let current: MoveNode = buildMoveTree(startFen, games[0].moves);
+
           const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
           const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
 
           let analysisReset: (() => void) | null = null;
-          let currentArrows: EngineArrow[] = [];
 
-          function render(): void {
-            wrapper.innerHTML = "";
-
-            // Game selector — only shown when the PGN contains more than one game
-            if (games.length > 1) {
-              const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
-              const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
-              games.forEach((g: PgnGame, i: number) => {
-                const opt = select.createEl("option", {
-                  value: String(i),
-                  text: gameLabel(g, i),
-                });
-                if (i === gameIndex) opt.selected = true;
-              });
-              select.addEventListener("change", () => {
-                gameIndex = parseInt(select.value, 10);
-                root = buildMoveTree(startFen, games[gameIndex].moves);
-                current = root;
-                currentArrows = [];
-                analysisReset?.();
-                render();
-              });
-            }
-
-            const viewerDiv = wrapper.createDiv();
-            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result, currentArrows.length ? currentArrows : undefined);
-            attachHandlers(viewerDiv);
-          }
-
-          function attachHandlers(viewerDiv: HTMLElement): void {
-            viewerDiv.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
-              btn.addEventListener("click", () => {
-                const action = btn.dataset.action;
-                if (action === "prev" && current.parent) { current = current.parent; currentArrows = []; analysisReset?.(); render(); }
-                else if (action === "next" && current.next) { current = current.next; currentArrows = []; analysisReset?.(); render(); }
-              });
+          // Game selector — only shown when the PGN contains more than one game
+          if (games.length > 1) {
+            const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
+            const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
+            games.forEach((g: PgnGame, i: number) => {
+              const opt = select.createEl("option", { value: String(i), text: gameLabel(g, i) });
+              if (i === gameIndex) opt.selected = true;
             });
-
-            viewerDiv.querySelectorAll<HTMLElement>("[data-node-id]").forEach((token) => {
-              token.addEventListener("click", () => {
-                const id = parseInt(token.dataset.nodeId ?? "-1", 10);
-                const found = findNodeById(root, id);
-                if (found) { current = found; currentArrows = []; analysisReset?.(); render(); }
-              });
+            select.addEventListener("change", () => {
+              gameIndex = parseInt(select.value, 10);
+              const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
+              current = newRoot;
+              analysisReset?.();
+              viewer.reset(newRoot, games[gameIndex].result);
             });
           }
 
-          render();
+          const viewer = mountPgnViewer(
+            wrapper,
+            current,
+            current,
+            baseConfig,
+            games[gameIndex].result,
+            (node) => {
+              current = node;
+              analysisReset?.();
+              viewer.update(node);
+            },
+          );
 
           if (params.analysis) {
             const { reset } = mountAnalysisPanel(
@@ -746,7 +812,7 @@ export default class ChessPlugin extends Plugin {
               () => current.state,
               baseConfig,
               this.getEngineWorker.bind(this),
-              (arrows) => { currentArrows = arrows; render(); }
+              (arrows) => { viewer.update(current, arrows); }
             );
             analysisReset = reset;
           }

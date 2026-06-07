@@ -163,7 +163,7 @@ export function renderControls(
 // Move list rendering
 // ---------------------------------------------------------------------------
 
-function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
+export function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
   if (!root.next) return "";
 
   const parts: string[] = [];
