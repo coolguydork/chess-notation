@@ -205,6 +205,7 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     for (const varHead of cur.variationHeads) {
       out.push(`<span class="chess-variation">`);
       out.push(`<span class="chess-variation-paren">(</span>`);
+      out.push(`<button class="chess-promote-btn" data-promote-id="${varHead.id}" title="Promote to main line">⇑</button>`);
       renderLine(varHead, currentId, out, /* firstInLine */ true);
       out.push(`<span class="chess-variation-paren">)</span>`);
       out.push(`</span>`);
@@ -247,4 +248,32 @@ export function attachMove(current: MoveNode, san: string, newState: BoardState)
   const node = makeNode(san, moveNumber, color, newState, current);
   current.next = node;
   return node;
+}
+
+// ---------------------------------------------------------------------------
+// promoteVariation
+// Swaps a variation head with the current mainline move so that the variation
+// becomes the new mainline and the old mainline becomes a variation.
+//
+// Before:  parent → mainNode (variationHeads: [varHead, ...])
+// After:   parent → varHead  (variationHeads: [mainNode, ...])
+//          mainNode loses varHead from its variationHeads
+// ---------------------------------------------------------------------------
+
+export function promoteVariation(varHead: MoveNode): void {
+  const parent = varHead.parent;
+  if (!parent?.next) return;
+
+  const mainNode = parent.next;
+  const idx = mainNode.variationHeads.indexOf(varHead);
+  if (idx === -1) return;
+
+  // Detach varHead from mainNode's variation list
+  mainNode.variationHeads.splice(idx, 1);
+
+  // Old mainline becomes the first variation of varHead
+  varHead.variationHeads.unshift(mainNode);
+
+  // varHead takes over as mainline
+  parent.next = varHead;
 }

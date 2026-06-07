@@ -146,6 +146,30 @@
   margin: 0 1px;
 }
 
+.chess-promote-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75em;
+  color: var(--text-faint);
+  padding: 0 2px;
+  margin-right: 2px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  vertical-align: middle;
+  box-shadow: none;
+}
+
+.chess-variation:hover .chess-promote-btn {
+  opacity: 1;
+}
+
+.chess-promote-btn:hover {
+  color: var(--text-accent);
+}
+
 .chess-game-selector {
   width: 100%;
   margin-bottom: 4px;

@@ -3,7 +3,7 @@ import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove } from "../render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
 import {
@@ -525,7 +525,22 @@ function mountPgnViewer(
 
   // Delegated listener on the stable container — survives innerHTML swaps.
   moveListEl.addEventListener("click", (e: MouseEvent) => {
-    const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
+    const target = e.target as HTMLElement;
+
+    // Promote-variation button
+    const promoteBtn = target.closest<HTMLElement>("[data-promote-id]");
+    if (promoteBtn) {
+      const id = parseInt(promoteBtn.dataset.promoteId ?? "-1", 10);
+      const varHead = findNodeById(root, id);
+      if (varHead) {
+        promoteVariation(varHead);
+        onNavigate(current);
+      }
+      return;
+    }
+
+    // Move token navigation
+    const token = target.closest<HTMLElement>("[data-node-id]");
     if (!token) return;
     const id = parseInt(token.dataset.nodeId ?? "-1", 10);
     const found = findNodeById(root, id);
