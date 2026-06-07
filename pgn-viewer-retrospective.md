@@ -74,7 +74,7 @@ dependency on an earlier task.
 - [x] Task 13 — Engine-ready move path (→ 4)
 - [x] Task 14 — Obsidian lifecycle + integration (→ 6, 7, 8)
 - [x] Task 15 — Tests (→ 4, 6)
-- [ ] Final verification gate (manual smoke tests in Obsidian)
+- [x] Final verification gate (manual smoke tests in Obsidian)
 
 ### Canonical names (use these exact identifiers)
 

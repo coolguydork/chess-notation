@@ -7,28 +7,23 @@ notation inside markdown notes.
 
 ## Architecture
 
-The codebase is split into three layers. **Dependencies only flow downward.**
+The codebase is split into four layers. **Dependencies only flow downward.**
 Nothing in a lower layer may import from a layer above it.
 
 ```
 src/
   core/     — pure chess logic, no UI, no Obsidian
   render/   — board rendering (SVG) and controls (HTML), no Obsidian
-  plugin/   — Obsidian glue; wires core + render into the plugin lifecycle
+  view/     — DOM-aware interaction logic, no Obsidian
+  plugin/   — Obsidian glue; wires core + render + view into the plugin lifecycle
 tests/
   core/
   render/
+  view/
   plugin/
 ```
 
-> **Planned fourth layer — `view/` (DOM-aware, Obsidian-free).** Interaction
-> logic (pointer/drag handling, selection, animation, the PGN viewer) is
-> DOM-aware but not Obsidian-specific, and currently has no home, so it
-> accumulated in `plugin/main.ts`. It is being extracted into a `view/` layer
-> that sits between `render/` and `plugin/` (flow: `core → render → view →
-> plugin`). **Until that lands, do not add new interaction logic to `plugin/` —
-> it belongs in `view/`.** See [`pgn-viewer-retrospective.md`](pgn-viewer-retrospective.md),
-> Tasks A–B.
+Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer) belongs in `view/`, not `plugin/`.
 
 ### `core/` — Chess logic
 - Board state, move generation, rule enforcement
