@@ -3,7 +3,7 @@ import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parsePGN } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildSnapshots, renderControls } from "../render/controls";
+import { buildMoveTree, findNodeById, renderControls } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
 import {
@@ -17,7 +17,7 @@ import {
 } from "../render/config";
 import { scoreToString } from "../core/engine";
 import { EngineWorker } from "./engine-worker";
-import type { Piece, BoardState } from "../core/types";
+import type { Piece, BoardState, MoveNode } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -555,15 +555,15 @@ export default class ChessPlugin extends Plugin {
             return;
           }
 
-          // PGN viewer with move navigation
+          // PGN viewer with move navigation (supports variation branches)
           const game = parsePGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
-          const snapshots = buildSnapshots(startFen, game.moves);
-          let currentIndex = 0;
+          const root = buildMoveTree(startFen, game.moves);
+          let current: MoveNode = root;
           const wrapper = el.createDiv({ cls: "chess-viewer-wrapper" });
 
           function render(): void {
-            wrapper.innerHTML = renderControls(snapshots, currentIndex, baseConfig, game.result);
+            wrapper.innerHTML = renderControls(root, current, baseConfig, game.result);
             attachHandlers();
           }
 
@@ -571,18 +571,16 @@ export default class ChessPlugin extends Plugin {
             wrapper.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
               btn.addEventListener("click", () => {
                 const action = btn.dataset.action;
-                if (action === "prev" && currentIndex > 0) { currentIndex--; render(); }
-                else if (action === "next" && currentIndex < snapshots.length - 1) { currentIndex++; render(); }
+                if (action === "prev" && current.parent) { current = current.parent; render(); }
+                else if (action === "next" && current.next) { current = current.next; render(); }
               });
             });
 
-            wrapper.querySelectorAll<HTMLElement>("[data-index]").forEach((token) => {
+            wrapper.querySelectorAll<HTMLElement>("[data-node-id]").forEach((token) => {
               token.addEventListener("click", () => {
-                const idx = parseInt(token.dataset.index ?? "0", 10);
-                if (!isNaN(idx) && idx >= 0 && idx < snapshots.length) {
-                  currentIndex = idx;
-                  render();
-                }
+                const id = parseInt(token.dataset.nodeId ?? "-1", 10);
+                const found = findNodeById(root, id);
+                if (found) { current = found; render(); }
               });
             });
           }

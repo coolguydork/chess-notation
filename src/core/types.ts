@@ -54,3 +54,22 @@ export interface PgnGame {
   moves: PgnMove[];
   result: string; // "1-0" | "0-1" | "1/2-1/2" | "*"
 }
+
+// ---------------------------------------------------------------------------
+// Move tree (used by render/controls for navigation)
+// ---------------------------------------------------------------------------
+
+export interface MoveNode {
+  id: number;
+  san: string | null;         // null for the root (initial position)
+  moveNumber: number;         // 0 for root
+  color: Color | null;        // null for root
+  comment?: string;
+  nags?: number[];
+  state: BoardState;
+  parent: MoveNode | null;
+  next: MoveNode | null;           // continuation within this line
+  variationHeads: MoveNode[];      // first node of each variation shown after this move
+                                   // (each variation is an alternative to this move,
+                                   //  starting from the same parent position)
+}
