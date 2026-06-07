@@ -337,14 +337,21 @@ function uciToArrow(uciMove: string, color: string): EngineArrow {
 
 function mountAnalysisPanel(
   container: HTMLElement,
-  boardWrapper: HTMLElement,
+  boardWrapper: HTMLElement | null,
   getState: () => BoardState,
   baseConfig: BoardConfig,
-  getWorker: () => EngineWorker
-): void {
+  getWorker: () => EngineWorker,
+  onArrows?: (arrows: EngineArrow[]) => void
+): { reset: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
   const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyse-btn" });
   const output = panel.createDiv({ cls: "chess-analysis-output" });
+
+  function reset(): void {
+    btn.disabled = false;
+    btn.textContent = "Analyze";
+    output.empty();
+  }
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -356,11 +363,14 @@ function mountAnalysisPanel(
       const state = getState();
       const result = await worker.analyse(state, []);
 
-      // Draw arrows for each top move
       const arrows: EngineArrow[] = result.moves.map((m, i) =>
         uciToArrow(m.uci, ARROW_COLORS[i] ?? ARROW_COLORS[ARROW_COLORS.length - 1])
       );
-      boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
+
+      if (boardWrapper) {
+        boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
+      }
+      onArrows?.(arrows);
 
       // Show eval list
       for (const move of result.moves) {
@@ -378,6 +388,8 @@ function mountAnalysisPanel(
       btn.disabled = false;
     }
   });
+
+  return { reset };
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +586,11 @@ export default class ChessPlugin extends Plugin {
           let gameIndex = 0;
           let root = buildMoveTree(startFen, games[0].moves);
           let current: MoveNode = root;
-          const wrapper = el.createDiv({ cls: "chess-viewer-wrapper" });
+          const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
+          const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
+
+          let analysisReset: (() => void) | null = null;
+          let currentArrows: EngineArrow[] = [];
 
           function render(): void {
             wrapper.innerHTML = "";
@@ -594,12 +610,14 @@ export default class ChessPlugin extends Plugin {
                 gameIndex = parseInt(select.value, 10);
                 root = buildMoveTree(startFen, games[gameIndex].moves);
                 current = root;
+                currentArrows = [];
+                analysisReset?.();
                 render();
               });
             }
 
             const viewerDiv = wrapper.createDiv();
-            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result);
+            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result, currentArrows.length ? currentArrows : undefined);
             attachHandlers(viewerDiv);
           }
 
@@ -607,8 +625,8 @@ export default class ChessPlugin extends Plugin {
             viewerDiv.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
               btn.addEventListener("click", () => {
                 const action = btn.dataset.action;
-                if (action === "prev" && current.parent) { current = current.parent; render(); }
-                else if (action === "next" && current.next) { current = current.next; render(); }
+                if (action === "prev" && current.parent) { current = current.parent; currentArrows = []; analysisReset?.(); render(); }
+                else if (action === "next" && current.next) { current = current.next; currentArrows = []; analysisReset?.(); render(); }
               });
             });
 
@@ -616,12 +634,24 @@ export default class ChessPlugin extends Plugin {
               token.addEventListener("click", () => {
                 const id = parseInt(token.dataset.nodeId ?? "-1", 10);
                 const found = findNodeById(root, id);
-                if (found) { current = found; render(); }
+                if (found) { current = found; currentArrows = []; analysisReset?.(); render(); }
               });
             });
           }
 
           render();
+
+          if (params.analysis) {
+            const { reset } = mountAnalysisPanel(
+              outerContainer,
+              null,
+              () => current.state,
+              baseConfig,
+              this.getEngineWorker.bind(this),
+              (arrows) => { currentArrows = arrows; render(); }
+            );
+            analysisReset = reset;
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           el.createEl("pre", { text: `Chess error: ${msg}`, cls: "chess-error" });
