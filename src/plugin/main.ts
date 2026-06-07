@@ -1,7 +1,7 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
-import { parseMultiPGN } from "../core/pgn";
+import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
 import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
@@ -440,6 +440,37 @@ function mountInteractiveBoard(
 }
 
 // ---------------------------------------------------------------------------
+// PGN write-back
+// Serializes the live MoveNode tree and overwrites the pgn: line in the
+// source file. Silently no-ops when called outside a file context (e.g.
+// hover previews) or when the block has no pgn: key.
+// ---------------------------------------------------------------------------
+
+async function writeBackPgn(
+  app: App,
+  ctx: MarkdownPostProcessorContext,
+  el: HTMLElement,
+  newPgn: string,
+): Promise<void> {
+  const info = ctx.getSectionInfo(el);
+  if (!info) return;
+
+  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
+  if (!(abstract instanceof TFile)) return;
+
+  const content = await app.vault.read(abstract);
+  const lines = content.split("\n");
+
+  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
+    if (/^\s*pgn\s*:/.test(lines[i])) {
+      lines[i] = `pgn: ${newPgn}`;
+      await app.vault.modify(abstract, lines.join("\n"));
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PGN viewer — DOM-stable mount
 // ---------------------------------------------------------------------------
 
@@ -761,7 +792,7 @@ export default class ChessPlugin extends Plugin {
 
     this.registerMarkdownCodeBlockProcessor(
       "chess",
-      (source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
+      (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
         try {
           const params = parseBlock(source);
 
@@ -801,7 +832,8 @@ export default class ChessPlugin extends Plugin {
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
-          let current: MoveNode = buildMoveTree(startFen, games[0].moves);
+          let root: MoveNode = buildMoveTree(startFen, games[0].moves);
+          let current: MoveNode = root;
 
           const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
           const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
@@ -818,16 +850,17 @@ export default class ChessPlugin extends Plugin {
             });
             select.addEventListener("change", () => {
               gameIndex = parseInt(select.value, 10);
-              const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
-              current = newRoot;
+              root = buildMoveTree(startFen, games[gameIndex].moves);
+              current = root;
               analysisReset?.();
-              viewer.reset(newRoot, games[gameIndex].result);
+              viewer.reset(root, games[gameIndex].result);
             });
           }
 
+          const app = this.app;
           const viewer = mountPgnViewer(
             wrapper,
-            current,
+            root,
             current,
             baseConfig,
             games[gameIndex].result,
@@ -835,6 +868,9 @@ export default class ChessPlugin extends Plugin {
               current = node;
               analysisReset?.();
               viewer.update(node);
+              if (games.length === 1) {
+                writeBackPgn(app, ctx, el, serializeMoveTree(root, games[0].result));
+              }
             },
           );
 
