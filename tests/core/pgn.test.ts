@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parsePGN, parseMultiPGN } from "../../src/core/pgn";
+import { parsePGN, parseMultiPGN, serializeMoveTree } from "../../src/core/pgn";
+import { buildMoveTree } from "../../src/render/controls";
 import type { PgnGame } from "../../src/core/types";
 
 describe("parsePGN", () => {
@@ -339,5 +340,104 @@ describe("parseMultiPGN", () => {
   it("throws when a game is missing its result token before the next header block", () => {
     // The header signals a new game; the first game has no result before it
     expect(() => parseMultiPGN('[White "Carol"]\n1. e4 e5\n[White "Dave"]\n1. d4 d5 *')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeMoveTree
+// ---------------------------------------------------------------------------
+
+const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+function roundTrip(pgn: string): string {
+  const { moves, result } = parsePGN(pgn);
+  const root = buildMoveTree(STARTING_FEN, moves);
+  return serializeMoveTree(root, result);
+}
+
+describe("serializeMoveTree", () => {
+  it("serializes a simple mainline", () => {
+    const out = roundTrip("1. e4 e5 2. Nf3 Nc6 *");
+    const { moves } = parsePGN(out);
+    expect(moves.map(m => m.san)).toEqual(["e4", "e5", "Nf3", "Nc6"]);
+  });
+
+  it("preserves the result token", () => {
+    const out = roundTrip("1. e4 e5 1-0");
+    expect(out.trim().endsWith("1-0")).toBe(true);
+  });
+
+  it("emits * for an unknown result", () => {
+    const { moves } = parsePGN("1. d4 *");
+    const root = buildMoveTree(STARTING_FEN, moves);
+    const out = serializeMoveTree(root);
+    expect(out.trim().endsWith("*")).toBe(true);
+  });
+
+  it("serializes NAGs as $N tokens", () => {
+    const out = roundTrip("1. e4! e5? *");
+    // $1 = !, $2 = ?
+    expect(out).toContain("$1");
+    expect(out).toContain("$2");
+    const { moves } = parsePGN(out);
+    expect(moves[0].nags).toEqual([1]);
+    expect(moves[1].nags).toEqual([2]);
+  });
+
+  it("serializes inline comments", () => {
+    const out = roundTrip("1. e4 { good move } e5 *");
+    expect(out).toContain("{ good move }");
+    const { moves } = parsePGN(out);
+    expect(moves[0].comment).toBe("good move");
+  });
+
+  it("serializes a single variation", () => {
+    const out = roundTrip("1. e4 e5 ( 1... c5 ) 2. Nf3 *");
+    expect(out).toContain("(");
+    expect(out).toContain(")");
+    const { moves } = parsePGN(out);
+    // mainline: e4 e5 Nf3
+    expect(moves.map(m => m.san)).toEqual(["e4", "e5", "Nf3"]);
+    // variation on e5's move: c5
+    expect(moves[1].variations?.[0].map(m => m.san)).toEqual(["c5"]);
+  });
+
+  it("serializes nested variations", () => {
+    const out = roundTrip("1. e4 e5 ( 1... c5 2. Nf3 ( 2. d4 ) ) *");
+    const { moves } = parsePGN(out);
+    const outerVar = moves[1].variations?.[0];
+    expect(outerVar?.map(m => m.san)).toEqual(["c5", "Nf3"]);
+    const innerVar = outerVar?.[1].variations?.[0];
+    expect(innerVar?.map(m => m.san)).toEqual(["d4"]);
+  });
+
+  it("serializes multiple variations on the same move", () => {
+    const out = roundTrip("1. e4 e5 ( 1... c5 ) ( 1... e6 ) *");
+    const { moves } = parsePGN(out);
+    expect(moves[1].variations?.length).toBe(2);
+    expect(moves[1].variations?.[0].map(m => m.san)).toEqual(["c5"]);
+    expect(moves[1].variations?.[1].map(m => m.san)).toEqual(["e6"]);
+  });
+
+  it("round-trips a realistic game fragment with variations and comments", () => {
+    const pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 { Ruy Lopez } a6 ( 3... Nf6 { Berlin } 4. O-O ) 4. Ba4 *";
+    const out = roundTrip(pgn);
+    const { moves } = parsePGN(out);
+    expect(moves[4].comment).toBe("Ruy Lopez");
+    expect(moves[5].variations?.[0].map(m => m.san)).toEqual(["Nf6", "O-O"]);
+    expect(moves[5].variations?.[0][0].comment).toBe("Berlin");
+  });
+
+  it("emits move numbers correctly after variations", () => {
+    const out = roundTrip("1. e4 e5 ( 1... c5 ) 2. Nf3 *");
+    // After the variation closes, black's reply was e5 (mainline),
+    // then 2. Nf3 — the serialized form should have "2." before Nf3
+    expect(out).toMatch(/2\.\s*Nf3/);
+  });
+
+  it("produces output that is parseable by parsePGN", () => {
+    const complex = "1. d4 d5 2. c4 e6 ( 2... c6 3. Nf3 ) 3. Nc3 Nf6 *";
+    const out = roundTrip(complex);
+    expect(() => parsePGN(out)).not.toThrow();
   });
 });
