@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshots, renderControls } from "../../src/render/controls";
+import { buildMoveTree, findNodeById, renderControls } from "../../src/render/controls";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
-import type { PgnGame } from "../../src/core/types";
+import type { PgnMove, MoveNode } from "../../src/core/types";
 import type { Piece } from "../../src/core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -16,147 +16,337 @@ const testConfig: BoardConfig = {
   resolvePieceUrl: (piece: Piece) => `/pieces/${piece.color}${piece.type.toUpperCase()}.svg`,
 };
 
-const italianGame: PgnGame = {
-  headers: { White: "Alice", Black: "Bob", Result: "1-0" },
-  moves: [
-    { san: "e4",  moveNumber: 1, color: "w" },
-    { san: "e5",  moveNumber: 1, color: "b" },
-    { san: "Nf3", moveNumber: 2, color: "w" },
-    { san: "Nc6", moveNumber: 2, color: "b" },
-    { san: "Bc4", moveNumber: 3, color: "w" },
-  ],
-  result: "1-0",
-};
+const italianMoves: PgnMove[] = [
+  { san: "e4",  moveNumber: 1, color: "w" },
+  { san: "e5",  moveNumber: 1, color: "b" },
+  { san: "Nf3", moveNumber: 2, color: "w" },
+  { san: "Nc6", moveNumber: 2, color: "b" },
+  { san: "Bc4", moveNumber: 3, color: "w" },
+];
 
-// ─── buildSnapshots ───────────────────────────────────────────────────────────
+// ─── buildMoveTree ────────────────────────────────────────────────────────────
 
-describe("buildSnapshots", () => {
-  it("starts with the initial position as snapshot 0", () => {
-    const snaps = buildSnapshots(STARTING_FEN, italianGame.moves);
-    expect(snaps[0].state).toEqual(parseFEN(STARTING_FEN));
-    expect(snaps[0].san).toBeNull(); // before any move
+describe("buildMoveTree", () => {
+  it("root node has null san and no parent", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    expect(root.san).toBeNull();
+    expect(root.parent).toBeNull();
+    expect(root.state).toEqual(parseFEN(STARTING_FEN));
   });
 
-  it("produces one snapshot per move plus the start", () => {
-    const snaps = buildSnapshots(STARTING_FEN, italianGame.moves);
-    expect(snaps).toHaveLength(6); // start + 5 moves
+  it("root.next is the first main-line move", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    expect(root.next?.san).toBe("e4");
+    expect(root.next?.moveNumber).toBe(1);
+    expect(root.next?.color).toBe("w");
   });
 
-  it("snapshot san matches the move that produced it", () => {
-    const snaps = buildSnapshots(STARTING_FEN, italianGame.moves);
-    expect(snaps[1].san).toBe("e4");
-    expect(snaps[2].san).toBe("e5");
-    expect(snaps[3].san).toBe("Nf3");
+  it("chains the full main line via .next links", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    const sans: string[] = [];
+    let cur = root.next;
+    while (cur) { sans.push(cur.san!); cur = cur.next; }
+    expect(sans).toEqual(["e4", "e5", "Nf3", "Nc6", "Bc4"]);
   });
 
-  it("each snapshot's state reflects the moves applied so far", () => {
-    const snaps = buildSnapshots(STARTING_FEN, italianGame.moves);
-    // After 1.e4: e4 pawn should be on e4, e2 empty
+  it("each node's parent links back correctly", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    const e4 = root.next!;
+    const e5 = e4.next!;
+    expect(e4.parent).toBe(root);
+    expect(e5.parent).toBe(e4);
+  });
+
+  it("each node's state reflects moves applied so far", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
     const idx = (file: number, rank: number) => (7 - rank) * 8 + file;
-    expect(snaps[1].state.board[idx(4, 3)]).toEqual({ type: "p", color: "w" }); // e4
-    expect(snaps[1].state.board[idx(4, 1)]).toBeNull(); // e2 empty
+    const afterE4 = root.next!.state;
+    expect(afterE4.board[idx(4, 3)]).toEqual({ type: "p", color: "w" }); // pawn on e4
+    expect(afterE4.board[idx(4, 1)]).toBeNull();                          // e2 empty
   });
 
-  it("works with an empty move list (FEN-only block)", () => {
-    const snaps = buildSnapshots(STARTING_FEN, []);
-    expect(snaps).toHaveLength(1);
-    expect(snaps[0].san).toBeNull();
+  it("returns a single root with no next for an empty move list", () => {
+    const root = buildMoveTree(STARTING_FEN, []);
+    expect(root.next).toBeNull();
+    expect(root.san).toBeNull();
+  });
+
+  it("assigns unique ids to every node", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    const ids = new Set<number>();
+    const visit = (n: MoveNode | null) => {
+      if (!n) return;
+      ids.add(n.id);
+      visit(n.next);
+      n.variationHeads.forEach(visit);
+    };
+    visit(root);
+    expect(ids.size).toBe(6); // root + 5 moves
+  });
+
+  describe("variations", () => {
+    it("attaches a variation as variationHead on the preceding move node", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+          { san: "d5", moveNumber: 1, color: "b" },
+        ]] },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const e4Node = root.next!;
+      expect(e4Node.variationHeads).toHaveLength(1);
+      expect(e4Node.variationHeads[0].san).toBe("d4");
+    });
+
+    it("variation nodes have the correct parent (branches from same position as main move)", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+        ]] },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const d4Node = root.next!.variationHeads[0];
+      expect(d4Node.parent).toBe(root);
+    });
+
+    it("variation node state is computed from the correct parent position", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+        ]] },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const d4Node = root.next!.variationHeads[0];
+      const idx = (file: number, rank: number) => (7 - rank) * 8 + file;
+      expect(d4Node.state.board[idx(3, 3)]).toEqual({ type: "p", color: "w" }); // d4
+      expect(d4Node.state.board[idx(3, 1)]).toBeNull();                          // d2 empty
+    });
+
+    it("variation line continues via .next links", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+          { san: "d5", moveNumber: 1, color: "b" },
+          { san: "c4", moveNumber: 2, color: "w" },
+        ]] },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const d4 = root.next!.variationHeads[0];
+      expect(d4.san).toBe("d4");
+      expect(d4.next?.san).toBe("d5");
+      expect(d4.next?.next?.san).toBe("c4");
+      expect(d4.next?.next?.next).toBeNull();
+    });
+
+    it("handles multiple variations on the same move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [
+          [{ san: "d4", moveNumber: 1, color: "w" }],
+          [{ san: "c4", moveNumber: 1, color: "w" }],
+        ]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const heads = root.next!.variationHeads;
+      expect(heads).toHaveLength(2);
+      expect(heads[0].san).toBe("d4");
+      expect(heads[1].san).toBe("c4");
+    });
+
+    it("handles nested variations (variation inside a variation)", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          {
+            san: "d4", moveNumber: 1, color: "w",
+            variations: [[{ san: "c4", moveNumber: 1, color: "w" }]],
+          },
+          { san: "d5", moveNumber: 1, color: "b" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const root = buildMoveTree(STARTING_FEN, moves);
+      const e4Node = root.next!;
+      const d4Node = e4Node.variationHeads[0];
+      expect(d4Node.san).toBe("d4");
+      expect(d4Node.variationHeads).toHaveLength(1);
+      expect(d4Node.variationHeads[0].san).toBe("c4");
+      expect(d4Node.variationHeads[0].parent).toBe(root);
+    });
+  });
+});
+
+// ─── findNodeById ─────────────────────────────────────────────────────────────
+
+describe("findNodeById", () => {
+  it("finds the root by id", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    expect(findNodeById(root, root.id)).toBe(root);
+  });
+
+  it("finds a main-line node by id", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    const nf3 = root.next!.next!.next!; // e4 → e5 → Nf3
+    expect(findNodeById(root, nf3.id)).toBe(nf3);
+  });
+
+  it("finds a variation node by id", () => {
+    const moves: PgnMove[] = [
+      { san: "e4", moveNumber: 1, color: "w", variations: [[
+        { san: "d4", moveNumber: 1, color: "w" },
+      ]]},
+      { san: "e5", moveNumber: 1, color: "b" },
+    ];
+    const root = buildMoveTree(STARTING_FEN, moves);
+    const d4 = root.next!.variationHeads[0];
+    expect(findNodeById(root, d4.id)).toBe(d4);
+  });
+
+  it("returns null for an unknown id", () => {
+    const root = buildMoveTree(STARTING_FEN, italianMoves);
+    expect(findNodeById(root, 99999)).toBeNull();
   });
 });
 
 // ─── renderControls ───────────────────────────────────────────────────────────
 
 describe("renderControls", () => {
-  const snaps = buildSnapshots(STARTING_FEN, italianGame.moves);
+  const root = buildMoveTree(STARTING_FEN, italianMoves);
+  const e4 = root.next!;
 
   it("returns a non-empty HTML string", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(typeof html).toBe("string");
-    expect(html.length).toBeGreaterThan(0);
+    expect(typeof renderControls(root, root, testConfig)).toBe("string");
+    expect(renderControls(root, root, testConfig).length).toBeGreaterThan(0);
   });
 
   it("includes an <svg> board", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(html).toContain("<svg ");
+    expect(renderControls(root, root, testConfig)).toContain("<svg ");
   });
 
   it("includes prev and next buttons", () => {
-    const html = renderControls(snaps, 0, testConfig);
+    const html = renderControls(root, root, testConfig);
     expect(html).toContain("data-action=\"prev\"");
     expect(html).toContain("data-action=\"next\"");
   });
 
-  it("marks prev button disabled at snapshot 0", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    // Extract just the prev button
-    const prevMatch = html.match(/data-action="prev"[^>]*>/);
-    expect(prevMatch).not.toBeNull();
-    expect(prevMatch![0]).toContain("disabled");
+  it("prev is disabled at root (no parent)", () => {
+    const m = renderControls(root, root, testConfig).match(/data-action="prev"[^>]*>/);
+    expect(m![0]).toContain("disabled");
   });
 
-  it("marks next button disabled at the last snapshot", () => {
-    const html = renderControls(snaps, snaps.length - 1, testConfig);
-    const nextMatch = html.match(/data-action="next"[^>]*>/);
-    expect(nextMatch).not.toBeNull();
-    expect(nextMatch![0]).toContain("disabled");
+  it("next is disabled at the last main-line node (no next)", () => {
+    let last = root.next!;
+    while (last.next) last = last.next;
+    const m = renderControls(root, last, testConfig).match(/data-action="next"[^>]*>/);
+    expect(m![0]).toContain("disabled");
   });
 
-  it("neither button is disabled at an intermediate snapshot", () => {
-    const html = renderControls(snaps, 2, testConfig);
-    const prevMatch = html.match(/data-action="prev"[^>]*>/);
-    const nextMatch = html.match(/data-action="next"[^>]*>/);
-    expect(prevMatch![0]).not.toContain("disabled");
-    expect(nextMatch![0]).not.toContain("disabled");
+  it("neither button is disabled at an intermediate node", () => {
+    const html = renderControls(root, e4, testConfig);
+    expect(html.match(/data-action="prev"[^>]*>/)![0]).not.toContain("disabled");
+    expect(html.match(/data-action="next"[^>]*>/)![0]).not.toContain("disabled");
   });
 
-  it("renders move list entries for each move", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(html).toContain("e4");
-    expect(html).toContain("e5");
-    expect(html).toContain("Nf3");
-    expect(html).toContain("Nc6");
-    expect(html).toContain("Bc4");
+  it("renders all main-line moves in the move list", () => {
+    const html = renderControls(root, root, testConfig);
+    ["e4", "e5", "Nf3", "Nc6", "Bc4"].forEach(san => expect(html).toContain(san));
   });
 
   it("renders move numbers in the move list", () => {
-    const html = renderControls(snaps, 0, testConfig);
+    const html = renderControls(root, root, testConfig);
     expect(html).toContain("1.");
     expect(html).toContain("2.");
     expect(html).toContain("3.");
   });
 
-  it("marks the active move with data-active", () => {
-    const html = renderControls(snaps, 3, testConfig); // after Nf3 (snapshot 3)
-    // snapshot 3 corresponds to move index 3 (san="Nf3")
-    expect(html).toContain("data-active=\"true\"");
+  it("uses data-node-id for move tokens", () => {
+    expect(renderControls(root, root, testConfig)).toContain("data-node-id=");
   });
 
-  it("no move is marked active at snapshot 0 (start position)", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(html).not.toContain("data-active=\"true\"");
+  it("marks the current node with data-active", () => {
+    expect(renderControls(root, e4, testConfig)).toContain("data-active=\"true\"");
   });
 
-  it("each move entry has a data-index attribute for click navigation", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(html).toContain("data-index=\"1\"");
-    expect(html).toContain("data-index=\"2\"");
+  it("no move is marked active when current is root", () => {
+    expect(renderControls(root, root, testConfig)).not.toContain("data-active=\"true\"");
   });
 
-  it("renders result token at the end of the move list", () => {
-    const html = renderControls(snaps, 0, testConfig, "1-0");
-    expect(html).toContain("1-0");
+  it("renders the result token when provided", () => {
+    expect(renderControls(root, root, testConfig, "1-0")).toContain("1-0");
   });
 
-  it("omits result token when not provided", () => {
-    const html = renderControls(snaps, 0, testConfig);
-    expect(html).not.toContain("1-0");
+  it("omits the result token when not provided", () => {
+    expect(renderControls(root, root, testConfig)).not.toContain("1-0");
   });
 
-  it("renders correctly with a single-snapshot (FEN-only) list", () => {
-    const fenOnlySnaps = buildSnapshots(STARTING_FEN, []);
-    const html = renderControls(fenOnlySnaps, 0, testConfig);
+  it("renders correctly for FEN-only (no moves)", () => {
+    const emptyRoot = buildMoveTree(STARTING_FEN, []);
+    const html = renderControls(emptyRoot, emptyRoot, testConfig);
     expect(html).toContain("<svg ");
-    // No move entries expected
-    expect(html).not.toContain("data-index");
+    expect(html).not.toContain("data-node-id");
+  });
+
+  describe("variation rendering", () => {
+    it("renders variation moves in the move list", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+          { san: "d5", moveNumber: 1, color: "b" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("d4");
+      expect(html).toContain("d5");
+      expect(html).toContain("chess-variation");
+    });
+
+    it("variation move nodes are navigable via data-node-id", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const d4Node = r.next!.variationHeads[0];
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain(`data-node-id="${d4Node.id}"`);
+    });
+
+    it("marks a variation node active when it is current", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const d4Node = r.next!.variationHeads[0];
+      const html = renderControls(r, d4Node, testConfig);
+      expect(html).toContain("data-active=\"true\"");
+    });
+
+    it("renders nested variations recursively", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          {
+            san: "d4", moveNumber: 1, color: "w",
+            variations: [[{ san: "c4", moveNumber: 1, color: "w" }]],
+          },
+          { san: "d5", moveNumber: 1, color: "b" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("d4");
+      expect(html).toContain("c4");
+      expect(html).toContain("d5");
+    });
   });
 });

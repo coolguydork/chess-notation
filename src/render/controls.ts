@@ -1,97 +1,171 @@
 import { parseFEN } from "../core/fen";
 import { applyMove } from "../core/moves";
 import { renderBoard } from "./board";
-import type { PgnMove, BoardState } from "../core/types";
+import type { PgnMove, MoveNode, Color, BoardState } from "../core/types";
 import type { BoardConfig } from "./config";
 
 // ---------------------------------------------------------------------------
-// Snapshot — a board state reached after applying a specific move
+// buildMoveTree
+// Converts a flat PgnMove[] (with nested .variations) into a linked MoveNode
+// tree. Each node stores the board state after its move plus parent/next/
+// variationHeads links so the UI can navigate any branch.
 // ---------------------------------------------------------------------------
 
-export interface Snapshot {
-  san: string | null; // null for the initial position (before any move)
-  moveIndex: number;  // 1-based; 0 for the start snapshot
-  state: BoardState;
+let _idCounter = 0;
+
+function makeNode(
+  san: string | null,
+  moveNumber: number,
+  color: Color | null,
+  state: BoardState,
+  parent: MoveNode | null,
+  comment?: string,
+  nags?: number[]
+): MoveNode {
+  return {
+    id: _idCounter++,
+    san,
+    moveNumber,
+    color,
+    comment,
+    nags: nags?.length ? nags : undefined,
+    state,
+    parent,
+    next: null,
+    variationHeads: [],
+  };
+}
+
+// Extend a line forward from parentNode by applying each PgnMove in sequence.
+function buildLine(parentNode: MoveNode, pgnMoves: PgnMove[]): void {
+  let cur = parentNode;
+  for (const m of pgnMoves) {
+    const node = makeNode(m.san, m.moveNumber, m.color, applyMove(cur.state, m.san), cur, m.comment, m.nags);
+    cur.next = node;
+
+    // m.variations are alternatives to m — they branch from cur (m's parent).
+    // Attach each as a variationHead on node (displayed right after node).
+    for (const varLine of (m.variations ?? [])) {
+      if (varLine.length > 0) attachVariation(cur, varLine, node);
+    }
+
+    cur = node;
+  }
+}
+
+// Create the first node of a variation line and attach it to precedingNode's
+// variationHeads. Recursively handles variations nested inside the first move.
+function attachVariation(parentNode: MoveNode, varPgn: PgnMove[], precedingNode: MoveNode): void {
+  const first = varPgn[0];
+  const firstNode = makeNode(
+    first.san, first.moveNumber, first.color,
+    applyMove(parentNode.state, first.san),
+    parentNode, first.comment, first.nags
+  );
+  precedingNode.variationHeads.push(firstNode);
+
+  // Nested variations on the first variation move (alternatives to it, same parent)
+  for (const nested of (first.variations ?? [])) {
+    if (nested.length > 0) attachVariation(parentNode, nested, firstNode);
+  }
+
+  buildLine(firstNode, varPgn.slice(1));
+}
+
+export function buildMoveTree(startFen: string, pgnMoves: PgnMove[]): MoveNode {
+  _idCounter = 0;
+  const root = makeNode(null, 0, null, parseFEN(startFen), null);
+  buildLine(root, pgnMoves);
+  return root;
 }
 
 // ---------------------------------------------------------------------------
-// buildSnapshots
-// Replays all main-line moves from the starting FEN and produces one snapshot
-// per position (initial + one per move).
+// findNodeById
+// BFS over the full tree (main line + all variation branches).
 // ---------------------------------------------------------------------------
 
-export function buildSnapshots(startFen: string, moves: PgnMove[]): Snapshot[] {
-  const snapshots: Snapshot[] = [];
-  let state = parseFEN(startFen);
-  snapshots.push({ san: null, moveIndex: 0, state });
-
-  for (let i = 0; i < moves.length; i++) {
-    state = applyMove(state, moves[i].san);
-    snapshots.push({ san: moves[i].san, moveIndex: i + 1, state });
+export function findNodeById(root: MoveNode, id: number): MoveNode | null {
+  const queue: MoveNode[] = [root];
+  while (queue.length) {
+    const node = queue.shift()!;
+    if (node.id === id) return node;
+    if (node.next) queue.push(node.next);
+    for (const v of node.variationHeads) queue.push(v);
   }
-
-  return snapshots;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
 // renderControls
 // Returns a self-contained HTML string: board SVG + navigation buttons +
-// move list. No Obsidian imports. plugin/ wires up click handlers.
+// move list (main line + all variation branches).
 //
 // data-action="prev" / data-action="next"  — nav buttons
-// data-index="N"                            — each move token (1-based)
-// data-active="true"                        — the currently displayed move
+// data-node-id="N"                         — each move token
+// data-active="true"                       — the currently displayed move
 // ---------------------------------------------------------------------------
 
 export function renderControls(
-  snapshots: Snapshot[],
-  currentIndex: number,
+  root: MoveNode,
+  current: MoveNode,
   config: BoardConfig,
   result?: string
 ): string {
-  const current = snapshots[currentIndex];
   const boardSvg = renderBoard(current.state, config);
 
-  const isFirst = currentIndex === 0;
-  const isLast = currentIndex === snapshots.length - 1;
-
-  const prevDisabled = isFirst ? " disabled" : "";
-  const nextDisabled = isLast ? " disabled" : "";
+  const prevDisabled = !current.parent ? " disabled" : "";
+  const nextDisabled = !current.next   ? " disabled" : "";
 
   const nav = `<div class="chess-nav">
   <button data-action="prev"${prevDisabled}>&#8592;</button>
   <button data-action="next"${nextDisabled}>&#8594;</button>
 </div>`;
 
-  // Build move list — group by move number, two moves per row
-  const moveTokens = snapshots.slice(1); // skip start snapshot
-  const rows: string[] = [];
-
-  let i = 0;
-  while (i < moveTokens.length) {
-    const white = moveTokens[i];
-    const black = moveTokens[i + 1]; // may be undefined (last move was white's)
-    const num = Math.ceil(white.moveIndex / 2);
-
-    const whiteActive = white.moveIndex === currentIndex ? " data-active=\"true\"" : "";
-    const blackActive = black && black.moveIndex === currentIndex ? " data-active=\"true\"" : "";
-
-    const whiteToken = `<span class="chess-move" data-index="${white.moveIndex}"${whiteActive}>${white.san}</span>`;
-    const blackToken = black
-      ? `<span class="chess-move" data-index="${black.moveIndex}"${blackActive}>${black.san}</span>`
-      : "";
-
-    rows.push(`<span class="chess-move-number">${num}.</span>${whiteToken}${blackToken}`);
-    i += 2;
-  }
-
-  const resultToken = result
-    ? `<span class="chess-result">${result}</span>`
-    : "";
-
-  const moveList = moveTokens.length > 0
-    ? `<div class="chess-move-list">${rows.join("")}${resultToken}</div>`
-    : "";
+  const moveList = buildMoveListHtml(root, current.id, result);
 
   return `<div class="chess-viewer">${boardSvg}${nav}${moveList}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Move list rendering
+// ---------------------------------------------------------------------------
+
+function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
+  if (!root.next) return "";
+
+  const parts: string[] = [];
+  renderLine(root.next, currentId, parts, /* firstInLine */ true);
+  if (result) parts.push(`<span class="chess-result">${result}</span>`);
+
+  return `<div class="chess-move-list">${parts.join("")}</div>`;
+}
+
+// Render a sequence of linked nodes, inserting variation sub-trees inline.
+// needsMoveNumber: true at the start of any line and after a variation closes.
+function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveNumber: boolean): void {
+  let cur: MoveNode | null = head;
+  let showNumber = needsMoveNumber;
+
+  while (cur) {
+    if (cur.color === "w" || showNumber) {
+      const dots = cur.color === "w" ? "." : "…"; // "…" for black-to-move marker
+      out.push(`<span class="chess-move-number">${cur.moveNumber}${dots}</span>`);
+      showNumber = false;
+    }
+
+    const active = cur.id === currentId ? ` data-active="true"` : "";
+    out.push(`<span class="chess-move" data-node-id="${cur.id}"${active}>${cur.san}</span>`);
+
+    // Variation lines shown after this move (each branches from cur.parent)
+    for (const varHead of cur.variationHeads) {
+      out.push(`<span class="chess-variation">`);
+      out.push(`<span class="chess-variation-paren">(</span>`);
+      renderLine(varHead, currentId, out, /* firstInLine */ true);
+      out.push(`<span class="chess-variation-paren">)</span>`);
+      out.push(`</span>`);
+      showNumber = true; // re-show move number after a variation closes
+    }
+
+    cur = cur.next;
+  }
 }
