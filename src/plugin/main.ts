@@ -161,7 +161,8 @@ const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
 function mountInteractiveBoard(
   wrapper: HTMLElement,
   initialState: BoardState,
-  baseConfig: BoardConfig
+  baseConfig: BoardConfig,
+  turnIndicator?: HTMLElement
 ): () => BoardState {
   let state = initialState;
   let selected: number | null = null;
@@ -176,6 +177,13 @@ function mountInteractiveBoard(
   let dragStartX = 0;
   let dragStartY = 0;
 
+  function updateTurnIndicator(): void {
+    if (!turnIndicator) return;
+    const color = state.activeColor;
+    turnIndicator.className = `chess-turn-indicator chess-turn-indicator--${color}`;
+    turnIndicator.setText(color === "w" ? "White to move" : "Black to move");
+  }
+
   function render(): void {
     const config: BoardConfig = {
       ...baseConfig,
@@ -184,6 +192,7 @@ function mountInteractiveBoard(
       userArrows: userArrows.length > 0 ? userArrows : undefined,
     };
     wrapper.innerHTML = renderBoard(state, config);
+    updateTurnIndicator();
   }
 
   function removeGhost(): void {
@@ -658,7 +667,9 @@ export default class ChessPlugin extends Plugin {
             const state = parseFEN(params.fen);
             const container = el.createDiv({ cls: "chess-analysis-container" });
             const boardWrapper = container.createDiv({ cls: "chess-board" });
-            const getState = mountInteractiveBoard(boardWrapper, state, baseConfig);
+            const turnEl = container.createDiv({ cls: `chess-turn-indicator chess-turn-indicator--${state.activeColor}` });
+            turnEl.setText(state.activeColor === "w" ? "White to move" : "Black to move");
+            const getState = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
 
             if (params.analysis) {
               mountAnalysisPanel(container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this));
