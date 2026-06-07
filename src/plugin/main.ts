@@ -504,6 +504,69 @@ async function writeBackPgn(
 }
 
 // ---------------------------------------------------------------------------
+// Piece move animation overlay
+// ---------------------------------------------------------------------------
+
+function animatePieceOverlay(
+  wrapper: HTMLElement,
+  move: { from: number; to: number },
+  config: BoardConfig,
+  pieceUrl: string,
+  onDone?: () => void,
+): () => void {
+  const { squareSize, orientation } = config;
+  const boardSize = squareSize * 8;
+
+  function toPercent(idx: number): { left: string; top: string } {
+    const rank = 7 - Math.floor(idx / 8);
+    const file = idx % 8;
+    const col = orientation === "white" ? file : 7 - file;
+    const row = orientation === "white" ? 7 - rank : rank;
+    return {
+      left: `${(col / 8) * 100}%`,
+      top:  `${(row / 8) * 100}%`,
+    };
+  }
+
+  const size = `${(squareSize / boardSize) * 100}%`;
+  const from = toPercent(move.from);
+  const to   = toPercent(move.to);
+
+  const img = document.createElement("img");
+  img.src = pieceUrl;
+  img.className = "chess-piece-anim";
+  img.style.width  = size;
+  img.style.height = size;
+  img.style.left   = from.left;
+  img.style.top    = from.top;
+
+  wrapper.appendChild(img);
+
+  // Force layout so the starting position is painted before we apply the transition target.
+  img.getBoundingClientRect();
+
+  img.style.left = to.left;
+  img.style.top  = to.top;
+
+  let finished = false;
+  function finish() {
+    if (finished) return;
+    finished = true;
+    img.remove();
+    onDone?.();
+  }
+
+  img.addEventListener("transitionend", finish, { once: true });
+  const timer = setTimeout(finish, 400);
+
+  return function cancel() {
+    clearTimeout(timer);
+    finished = true;
+    img.remove();
+  };
+}
+
+// ---------------------------------------------------------------------------
 // PGN viewer — DOM-stable mount
 // ---------------------------------------------------------------------------
 
@@ -525,6 +588,8 @@ function mountPgnViewer(
   let root = initialRoot;
   let current = initialCurrent;
   let currentResult = result;
+  let pendingAnimation: { from: number; to: number } | undefined;
+  let cancelHoverAnim: (() => void) | undefined;
 
   // ── Stable DOM skeleton ──────────────────────────────────────────────────
   const viewerDiv  = container.createDiv({ cls: "chess-viewer" });
@@ -532,6 +597,7 @@ function mountPgnViewer(
   const navEl      = viewerDiv.createDiv({ cls: "chess-nav" });
   const prevBtn    = navEl.createEl("button", { text: "←" });
   const nextBtn    = navEl.createEl("button", { text: "→" });
+  const turnIndicatorEl = viewerDiv.createDiv({ cls: "chess-turn-indicator" });
   const moveListEl = viewerDiv.createDiv({ cls: "chess-move-list-container" });
 
   // ── Interactive board (owns board rendering and pointer events) ──────────
@@ -544,29 +610,58 @@ function mountPgnViewer(
       const { state: newState, from, to } = applyMoveEx(current.state, san);
       const newNode = attachMove(current, san, newState, from, to);
       current = newNode;
+      pendingAnimation = { from, to };
       onNavigate(current);
     },
   );
 
   // ── Nav / move-list event listeners — attached once ──────────────────────
   prevBtn.addEventListener("click", () => {
-    if (current.parent) { current = current.parent; onNavigate(current); }
+    if (current.parent) {
+      // Animate the moved piece sliding back (reverse direction).
+      if (current.from >= 0) pendingAnimation = { from: current.to, to: current.from };
+      current = current.parent;
+      onNavigate(current);
+    }
   });
   nextBtn.addEventListener("click", () => {
-    if (current.next) { current = current.next; onNavigate(current); }
+    if (current.next) {
+      current = current.next;
+      if (current.from >= 0) pendingAnimation = { from: current.from, to: current.to };
+      onNavigate(current);
+    }
   });
 
-  // Hover preview: show the hovered move's position on the board temporarily.
+  // Hover preview: show the hovered move's position with a slide animation.
   moveListEl.addEventListener("mouseover", (e: MouseEvent) => {
     const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
     if (!token) return;
     const id = parseInt(token.dataset.nodeId ?? "-1", 10);
     const found = findNodeById(root, id);
-    if (found && found !== current) boardInteraction.setState(found.state, found.from >= 0 ? { from: found.from, to: found.to } : undefined);
+    if (!found || found === current) return;
+
+    cancelHoverAnim?.();
+    cancelHoverAnim = undefined;
+
+    const lm = found.from >= 0 ? { from: found.from, to: found.to } : undefined;
+    if (found.from >= 0) {
+      boardWrapperEl.innerHTML = renderBoard(found.state, { ...config, lastMove: lm, animatedMove: lm });
+      const piece = found.state.board[found.to];
+      if (piece) {
+        cancelHoverAnim = animatePieceOverlay(boardWrapperEl, lm!, config, config.resolvePieceUrl(piece), () => {
+          boardWrapperEl.querySelector<SVGImageElement>("#chess-anim-dest")?.removeAttribute("opacity");
+        });
+      }
+    } else {
+      boardInteraction.setState(found.state, lm);
+    }
   });
 
   moveListEl.addEventListener("mouseleave", () => {
-    boardInteraction.setState(current.state, current.from >= 0 ? { from: current.from, to: current.to } : undefined);
+    cancelHoverAnim?.();
+    cancelHoverAnim = undefined;
+    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+    boardInteraction.setState(current.state, lm);
   });
 
   // Delegated listener on the stable container — survives innerHTML swaps.
@@ -590,7 +685,11 @@ function mountPgnViewer(
     if (!token) return;
     const id = parseInt(token.dataset.nodeId ?? "-1", 10);
     const found = findNodeById(root, id);
-    if (found) { current = found; onNavigate(current); }
+    if (found) {
+      current = found;
+      if (current.from >= 0) pendingAnimation = { from: current.from, to: current.to };
+      onNavigate(current);
+    }
   });
 
   // ── Update helpers ───────────────────────────────────────────────────────
@@ -603,17 +702,36 @@ function mountPgnViewer(
     moveListEl.innerHTML = buildMoveListHtml(root, node.id, currentResult);
   }
 
+  function updateTurnIndicator(node: MoveNode): void {
+    const color = node.state.activeColor;
+    turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
+    turnIndicatorEl.setText(color === "w" ? "White to move" : "Black to move");
+  }
+
   function update(node: MoveNode, arrows?: EngineArrow[]): void {
     current = node;
     const lm = node.from >= 0 ? { from: node.from, to: node.to } : undefined;
+    const animated = pendingAnimation;
+    pendingAnimation = undefined;
     if (arrows?.length) {
-      // Engine arrows: render directly so arrow overlay is visible.
       boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, lastMove: lm, engineArrows: arrows });
+    } else if (animated) {
+      // Render board with the destination piece hidden, then slide an overlay onto it.
+      // After the animation, hand control back to boardInteraction so pointer events work.
+      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, lastMove: lm, animatedMove: animated });
+      const piece = node.state.board[animated.to];
+      if (piece) {
+        animatePieceOverlay(boardWrapperEl, animated, config, config.resolvePieceUrl(piece), () => {
+          boardInteraction.setState(node.state, lm);
+        });
+      } else {
+        boardInteraction.setState(node.state, lm);
+      }
     } else {
-      // Sync interactive board to the new position (also re-renders the board).
       boardInteraction.setState(node.state, lm);
     }
     updateNav(node);
+    updateTurnIndicator(node);
     updateMoveList(node);
   }
 
@@ -626,6 +744,7 @@ function mountPgnViewer(
 
   // Initial nav + move list (board already rendered by mountInteractiveBoard)
   updateNav(initialCurrent);
+  updateTurnIndicator(initialCurrent);
   updateMoveList(initialCurrent);
 
   return { update, reset };

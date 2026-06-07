@@ -38,6 +38,8 @@ export interface BoardConfig {
   // selectedSquare — the clicked piece's square (filled tint).
   // legalTargets   — destination squares for the selected piece (dot overlay).
   lastMove?: { from: number; to: number };
+  // When set, the piece at `to` is animated sliding from `from` on render.
+  animatedMove?: { from: number; to: number };
   selectedSquare?: number;
   legalTargets?: ReadonlySet<number>;
   // Engine move arrows drawn over the board (Phase 5).

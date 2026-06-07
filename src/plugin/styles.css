@@ -15,6 +15,16 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.chess-board-wrapper {
+  position: relative;
+}
+
+.chess-piece-anim {
+  position: absolute;
+  pointer-events: none;
+  transition: left 0.25s ease-out, top 0.25s ease-out;
+}
+
 .chess-viewer {
   display: flex;
   flex-direction: column;

@@ -35,7 +35,7 @@ function renderSquares(config: BoardConfig): string {
 }
 
 function renderPieces(board: readonly Square[], config: BoardConfig): string {
-  const { squareSize, orientation, resolvePieceUrl } = config;
+  const { squareSize, orientation, resolvePieceUrl, animatedMove } = config;
   const parts: string[] = [];
 
   for (let i = 0; i < 64; i++) {
@@ -47,8 +47,12 @@ function renderPieces(board: readonly Square[], config: BoardConfig): string {
     const y = row * squareSize;
     const url = resolvePieceUrl(piece);
 
+    // Hide the destination piece during animation; the overlay covers it.
+    const hidden = animatedMove && i === animatedMove.to;
     parts.push(
-      `<image href="${url}" x="${x}" y="${y}" width="${squareSize}" height="${squareSize}"/>`
+      `<image href="${url}" x="${x}" y="${y}" width="${squareSize}" height="${squareSize}"` +
+      (hidden ? ` id="chess-anim-dest" opacity="0"` : ``) +
+      `/>`
     );
   }
 
