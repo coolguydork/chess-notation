@@ -349,4 +349,119 @@ describe("renderControls", () => {
       expect(html).toContain("d5");
     });
   });
+
+  describe("NAG rendering", () => {
+    it("renders a known NAG as its symbol after the move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", nags: [1] }, // !
+        { san: "e5", moveNumber: 1, color: "b", nags: [2] }, // ?
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("chess-nags");
+      expect(html).toContain("!");
+      expect(html).toContain("?");
+    });
+
+    it("renders combined glyphs for multi-NAG moves", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", nags: [3] },  // !!
+        { san: "e5", moveNumber: 1, color: "b", nags: [5] },  // !?
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("!!");
+      expect(html).toContain("!?");
+    });
+
+    it("falls back to $N for unknown NAG numbers", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", nags: [99] },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("$99");
+    });
+
+    it("renders position-assessment NAGs", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", nags: [16] }, // ±
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("±");
+    });
+
+    it("omits chess-nags span when move has no NAGs", () => {
+      const r = buildMoveTree(STARTING_FEN, italianMoves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).not.toContain("chess-nags");
+    });
+
+    it("renders NAGs inside variations", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w", nags: [1] },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("chess-nags");
+      expect(html).toContain("!");
+    });
+  });
+
+  describe("comment rendering", () => {
+    it("renders a comment after its move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w" },
+        { san: "e5", moveNumber: 1, color: "b", comment: "This is a mistake" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("chess-comment");
+      expect(html).toContain("This is a mistake");
+    });
+
+    it("escapes HTML special characters in comments", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", comment: "a<b>&c" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("a&lt;b&gt;&amp;c");
+      expect(html).not.toContain("a<b>");
+    });
+
+    it("omits chess-comment span when move has no comment", () => {
+      const r = buildMoveTree(STARTING_FEN, italianMoves);
+      expect(renderControls(r, r, testConfig)).not.toContain("chess-comment");
+    });
+
+    it("renders comment after NAGs when both are present", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", nags: [1], comment: "Strong move" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      const nagsPos = html.indexOf("chess-nags");
+      const commentPos = html.indexOf("chess-comment");
+      expect(nagsPos).toBeGreaterThan(-1);
+      expect(commentPos).toBeGreaterThan(nagsPos);
+    });
+
+    it("renders comments inside variations", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", variations: [[
+          { san: "d4", moveNumber: 1, color: "w", comment: "Queens pawn" },
+        ]]},
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = renderControls(r, r, testConfig);
+      expect(html).toContain("Queens pawn");
+      expect(html).toContain("chess-comment");
+    });
+  });
 });

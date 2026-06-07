@@ -52,10 +52,6 @@
   font-size: 0.85em;
   line-height: 1.8;
   max-width: 100%;
-  flex-wrap: wrap;
-  display: flex;
-  align-items: baseline;
-  gap: 2px 0;
 }
 
 .chess-move-number {
@@ -89,30 +85,65 @@
   font-weight: 600;
 }
 
-.chess-variation {
-  display: inline;
+/* NAG glyphs: !, ?, !?, etc. — inline, immediately after the move token */
+.chess-nags {
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--text-accent);
+  margin: 0 3px 0 1px;
+  letter-spacing: -0.5px;
+}
+
+.chess-variation .chess-nags {
+  opacity: 0.8;
+}
+
+/* Annotation comments: block element so they sit on their own line,
+   italic and muted to distinguish from moves */
+.chess-comment {
+  display: block;
+  font-style: italic;
   color: var(--text-muted);
-  font-size: 0.88em;
+  font-size: 0.82em;
+  margin: 0 0 2px 4px;
+  line-height: 1.5;
+}
+
+/* Variations are block-level: each one drops onto its own indented line
+   with a left border, visually separating it from the main line. */
+.chess-variation {
+  display: block;
+  margin: 1px 0 1px 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.7;
 }
 
 .chess-variation .chess-move {
   color: var(--text-muted);
-  font-size: 1em; /* reset relative to parent */
 }
 
-.chess-variation .chess-move:hover,
-.chess-variation .chess-move[data-active="true"] {
+.chess-variation .chess-move:hover {
   color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.chess-variation .chess-move[data-active="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Nested variation: same size, slightly dimmer */
+.chess-variation .chess-variation {
+  font-size: 1em;
+  opacity: 0.85;
 }
 
 .chess-variation-paren {
   color: var(--text-faint);
   margin: 0 1px;
-}
-
-/* Nested variations get progressively smaller */
-.chess-variation .chess-variation {
-  font-size: 0.92em;
 }
 
 .chess-error {
