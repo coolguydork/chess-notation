@@ -37,6 +37,7 @@ export interface BoardConfig {
   // Optional square highlights: set of board indices to overlay.
   // selectedSquare — the clicked piece's square (filled tint).
   // legalTargets   — destination squares for the selected piece (dot overlay).
+  lastMove?: { from: number; to: number };
   selectedSquare?: number;
   legalTargets?: ReadonlySet<number>;
   // Engine move arrows drawn over the board (Phase 5).

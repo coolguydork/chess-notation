@@ -1,5 +1,5 @@
 import { parseFEN } from "../core/fen";
-import { applyMove } from "../core/moves";
+import { applyMoveEx } from "../core/moves";
 import { renderBoard } from "./board";
 import type { PgnMove, MoveNode, Color, BoardState } from "../core/types";
 import type { BoardConfig } from "./config";
@@ -50,6 +50,8 @@ function makeNode(
   moveNumber: number,
   color: Color | null,
   state: BoardState,
+  from: number,
+  to: number,
   parent: MoveNode | null,
   comment?: string,
   nags?: number[]
@@ -62,6 +64,8 @@ function makeNode(
     comment,
     nags: nags?.length ? nags : undefined,
     state,
+    from,
+    to,
     parent,
     next: null,
     variationHeads: [],
@@ -72,7 +76,8 @@ function makeNode(
 function buildLine(parentNode: MoveNode, pgnMoves: PgnMove[]): void {
   let cur = parentNode;
   for (const m of pgnMoves) {
-    const node = makeNode(m.san, m.moveNumber, m.color, applyMove(cur.state, m.san), cur, m.comment, m.nags);
+    const result = applyMoveEx(cur.state, m.san);
+    const node = makeNode(m.san, m.moveNumber, m.color, result.state, result.from, result.to, cur, m.comment, m.nags);
     cur.next = node;
 
     // m.variations are alternatives to m — they branch from cur (m's parent).
@@ -89,9 +94,10 @@ function buildLine(parentNode: MoveNode, pgnMoves: PgnMove[]): void {
 // variationHeads. Recursively handles variations nested inside the first move.
 function attachVariation(parentNode: MoveNode, varPgn: PgnMove[], precedingNode: MoveNode): void {
   const first = varPgn[0];
+  const firstResult = applyMoveEx(parentNode.state, first.san);
   const firstNode = makeNode(
     first.san, first.moveNumber, first.color,
-    applyMove(parentNode.state, first.san),
+    firstResult.state, firstResult.from, firstResult.to,
     parentNode, first.comment, first.nags
   );
   precedingNode.variationHeads.push(firstNode);
@@ -106,7 +112,7 @@ function attachVariation(parentNode: MoveNode, varPgn: PgnMove[], precedingNode:
 
 export function buildMoveTree(startFen: string, pgnMoves: PgnMove[]): MoveNode {
   _idCounter = 0;
-  const root = makeNode(null, 0, null, parseFEN(startFen), null);
+  const root = makeNode(null, 0, null, parseFEN(startFen), -1, -1, null);
   buildLine(root, pgnMoves);
   return root;
 }
@@ -144,7 +150,8 @@ export function renderControls(
   result?: string,
   engineArrows?: import("./config").EngineArrow[]
 ): string {
-  const boardSvg = renderBoard(current.state, engineArrows ? { ...config, engineArrows } : config);
+  const lastMove = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+  const boardSvg = renderBoard(current.state, { ...config, lastMove, ...(engineArrows ? { engineArrows } : {}) });
 
   const prevDisabled = !current.parent ? " disabled" : "";
   const nextDisabled = !current.next   ? " disabled" : "";
@@ -229,7 +236,7 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
 //   • current.next is null → extend the mainline with a new node
 // ---------------------------------------------------------------------------
 
-export function attachMove(current: MoveNode, san: string, newState: BoardState): MoveNode {
+export function attachMove(current: MoveNode, san: string, newState: BoardState, from: number, to: number): MoveNode {
   const color = current.state.activeColor;
   const moveNumber = current.state.fullmoveNumber;
 
@@ -239,13 +246,13 @@ export function attachMove(current: MoveNode, san: string, newState: BoardState)
       if (v.san === san) return v;
     }
     // New variation branching from the same parent position as current.next
-    const node = makeNode(san, moveNumber, color, newState, current);
+    const node = makeNode(san, moveNumber, color, newState, from, to, current);
     current.next.variationHeads.push(node);
     return node;
   }
 
   // Extend the mainline
-  const node = makeNode(san, moveNumber, color, newState, current);
+  const node = makeNode(san, moveNumber, color, newState, from, to, current);
   current.next = node;
   return node;
 }

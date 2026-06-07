@@ -5,7 +5,7 @@ import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
 import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
-import { applyMove } from "../core/moves";
+import { applyMove, applyMoveEx } from "../core/moves";
 import {
   DEFAULT_BOARD_CONFIG,
   BoardConfig,
@@ -160,7 +160,7 @@ const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
 
 interface InteractiveBoardHandle {
   getState: () => BoardState;
-  setState: (s: BoardState) => void;
+  setState: (s: BoardState, lastMove?: { from: number; to: number }) => void;
 }
 
 function mountInteractiveBoard(
@@ -171,6 +171,7 @@ function mountInteractiveBoard(
   onMove?: (san: string) => void,
 ): InteractiveBoardHandle {
   let state = initialState;
+  let lastMove: { from: number; to: number } | undefined;
   let selected: number | null = null;
   let legalTargets = new Set<number>();
   let userArrows: UserArrow[] = [];
@@ -193,6 +194,7 @@ function mountInteractiveBoard(
   function render(): void {
     const config: BoardConfig = {
       ...baseConfig,
+      lastMove,
       selectedSquare: selected ?? undefined,
       legalTargets: legalTargets.size > 0 ? legalTargets : undefined,
       userArrows: userArrows.length > 0 ? userArrows : undefined,
@@ -435,7 +437,7 @@ function mountInteractiveBoard(
   render();
   return {
     getState: () => state,
-    setState: (s: BoardState) => { state = s; selected = null; legalTargets = new Set(); render(); },
+    setState: (s: BoardState, lm?: { from: number; to: number }) => { state = s; lastMove = lm; selected = null; legalTargets = new Set(); render(); },
   };
 }
 
@@ -539,8 +541,8 @@ function mountPgnViewer(
     config,
     undefined,
     (san) => {
-      const newState = applyMove(current.state, san);
-      const newNode = attachMove(current, san, newState);
+      const { state: newState, from, to } = applyMoveEx(current.state, san);
+      const newNode = attachMove(current, san, newState, from, to);
       current = newNode;
       onNavigate(current);
     },
@@ -560,11 +562,11 @@ function mountPgnViewer(
     if (!token) return;
     const id = parseInt(token.dataset.nodeId ?? "-1", 10);
     const found = findNodeById(root, id);
-    if (found && found !== current) boardInteraction.setState(found.state);
+    if (found && found !== current) boardInteraction.setState(found.state, found.from >= 0 ? { from: found.from, to: found.to } : undefined);
   });
 
   moveListEl.addEventListener("mouseleave", () => {
-    boardInteraction.setState(current.state);
+    boardInteraction.setState(current.state, current.from >= 0 ? { from: current.from, to: current.to } : undefined);
   });
 
   // Delegated listener on the stable container — survives innerHTML swaps.
@@ -603,12 +605,13 @@ function mountPgnViewer(
 
   function update(node: MoveNode, arrows?: EngineArrow[]): void {
     current = node;
+    const lm = node.from >= 0 ? { from: node.from, to: node.to } : undefined;
     if (arrows?.length) {
       // Engine arrows: render directly so arrow overlay is visible.
-      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, engineArrows: arrows });
+      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, lastMove: lm, engineArrows: arrows });
     } else {
       // Sync interactive board to the new position (also re-renders the board).
-      boardInteraction.setState(node.state);
+      boardInteraction.setState(node.state, lm);
     }
     updateNav(node);
     updateMoveList(node);

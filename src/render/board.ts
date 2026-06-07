@@ -92,10 +92,21 @@ function renderCoordinates(config: BoardConfig): string {
 }
 
 function renderHighlights(config: BoardConfig): string {
-  const { squareSize, orientation, selectedSquare, legalTargets } = config;
-  if (selectedSquare === undefined && !legalTargets?.size) return "";
+  const { squareSize, orientation, lastMove, selectedSquare, legalTargets } = config;
+  if (!lastMove && selectedSquare === undefined && !legalTargets?.size) return "";
 
   const parts: string[] = [];
+
+  if (lastMove) {
+    for (const idx of [lastMove.from, lastMove.to]) {
+      const { col, row } = indexToColRow(idx, orientation);
+      const x = col * squareSize;
+      const y = row * squareSize;
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${squareSize}" height="${squareSize}" fill="rgba(255,255,0,0.35)" data-square="${idx}"/>`
+      );
+    }
+  }
 
   if (selectedSquare !== undefined) {
     const { col, row } = indexToColRow(selectedSquare, orientation);

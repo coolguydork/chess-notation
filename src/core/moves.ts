@@ -204,15 +204,25 @@ const CASTLING_SQUARE_RIGHTS: Record<number, keyof CastlingRights> = {
 // Public API
 // ---------------------------------------------------------------------------
 
-export function applyMove(state: BoardState, san: string): BoardState {
+export interface MoveResult {
+  state: BoardState;
+  from: number;  // board index of the moving piece's origin (-1 for null moves)
+  to: number;    // board index of the destination (-1 for null moves)
+}
+
+export function applyMoveEx(state: BoardState, san: string): MoveResult {
   // Null move (-- or Z0): pass the turn without moving a piece.
   if (san === "--" || san === "Z0") {
     return {
-      ...state,
-      activeColor: state.activeColor === "w" ? "b" : "w",
-      enPassant: null,
-      halfmoveClock: state.halfmoveClock + 1,
-      fullmoveNumber: state.fullmoveNumber + (state.activeColor === "b" ? 1 : 0),
+      state: {
+        ...state,
+        activeColor: state.activeColor === "w" ? "b" : "w",
+        enPassant: null,
+        halfmoveClock: state.halfmoveClock + 1,
+        fullmoveNumber: state.fullmoveNumber + (state.activeColor === "b" ? 1 : 0),
+      },
+      from: -1,
+      to: -1,
     };
   }
 
@@ -224,6 +234,8 @@ export function applyMove(state: BoardState, san: string): BoardState {
   let newEnPassant: EnPassantSquare | null = null;
   let newHalfmoveClock = state.halfmoveClock + 1;
   let newFullmoveNumber = state.fullmoveNumber + (activeColor === "b" ? 1 : 0);
+  let moveFrom: number;
+  let moveTo: number;
 
   if (parsed.castling) {
     const rank = activeColor === "w" ? 0 : 7;
@@ -244,6 +256,9 @@ export function applyMove(state: BoardState, san: string): BoardState {
     } else {
       newCastling = { ...newCastling, blackKingside: false, blackQueenside: false };
     }
+
+    moveFrom = kingFrom;
+    moveTo = kingTo;
   } else {
     const to = squareIndex(parsed.toFile, parsed.toRank);
     const from = findSource(state, parsed);
@@ -295,14 +310,25 @@ export function applyMove(state: BoardState, san: string): BoardState {
     const rightTo = CASTLING_SQUARE_RIGHTS[to];
     if (rightFrom) newCastling = { ...newCastling, [rightFrom]: false };
     if (rightTo) newCastling = { ...newCastling, [rightTo]: false };
+
+    moveFrom = from;
+    moveTo = to;
   }
 
   return {
-    board: newBoard,
-    activeColor: activeColor === "w" ? "b" : "w",
-    castling: newCastling,
-    enPassant: newEnPassant,
-    halfmoveClock: newHalfmoveClock,
-    fullmoveNumber: newFullmoveNumber,
+    state: {
+      board: newBoard,
+      activeColor: activeColor === "w" ? "b" : "w",
+      castling: newCastling,
+      enPassant: newEnPassant,
+      halfmoveClock: newHalfmoveClock,
+      fullmoveNumber: newFullmoveNumber,
+    },
+    from: moveFrom,
+    to: moveTo,
   };
+}
+
+export function applyMove(state: BoardState, san: string): BoardState {
+  return applyMoveEx(state, san).state;
 }

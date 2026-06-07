@@ -67,6 +67,8 @@ export interface MoveNode {
   comment?: string;
   nags?: number[];
   state: BoardState;
+  from: number;  // board index of the moving piece's origin (-1 for root/null moves)
+  to: number;    // board index of the destination (-1 for root/null moves)
   parent: MoveNode | null;
   next: MoveNode | null;           // continuation within this line
   variationHeads: MoveNode[];      // first node of each variation shown after this move
