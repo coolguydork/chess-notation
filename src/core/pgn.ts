@@ -1,4 +1,4 @@
-import type { PgnGame, PgnMove, Color } from "./types";
+import type { PgnGame, PgnMove, Color, MoveNode } from "./types";
 
 // ---------------------------------------------------------------------------
 // Tokeniser
@@ -299,4 +299,51 @@ export function parseMultiPGN(input: string): PgnGame[] {
 
   if (games.length === 0) throw new Error("PGN: no games found");
   return games;
+}
+
+// ---------------------------------------------------------------------------
+// serializeMoveTree
+// Walks a MoveNode tree (built by buildMoveTree in render/controls.ts) and
+// emits a PGN move-text string (no headers). Variations are written as
+// standard parenthesised branches. Pass the game result as the second arg
+// (defaults to "*" for an ongoing/unknown game).
+// ---------------------------------------------------------------------------
+
+export function serializeMoveTree(root: MoveNode, result = "*"): string {
+  const parts: string[] = [];
+  serializeLine(root.next, parts, true);
+  parts.push(result);
+  return parts.join(" ");
+}
+
+function serializeLine(head: MoveNode | null, out: string[], needsMoveNumber: boolean): void {
+  let cur = head;
+  let showNumber = needsMoveNumber;
+
+  while (cur) {
+    if (cur.color === "w" || showNumber) {
+      out.push(cur.color === "w" ? `${cur.moveNumber}.` : `${cur.moveNumber}...`);
+      showNumber = false;
+    }
+
+    out.push(cur.san!);
+
+    if (cur.nags?.length) {
+      for (const n of cur.nags) out.push(`$${n}`);
+    }
+
+    if (cur.comment) {
+      out.push(`{ ${cur.comment} }`);
+      showNumber = true;
+    }
+
+    for (const varHead of cur.variationHeads) {
+      const varParts: string[] = [];
+      serializeLine(varHead, varParts, true);
+      out.push(`( ${varParts.join(" ")} )`);
+      showNumber = true;
+    }
+
+    cur = cur.next;
+  }
 }

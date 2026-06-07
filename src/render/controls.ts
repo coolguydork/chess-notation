@@ -163,7 +163,7 @@ export function renderControls(
 // Move list rendering
 // ---------------------------------------------------------------------------
 
-function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
+export function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
   if (!root.next) return "";
 
   const parts: string[] = [];
@@ -205,6 +205,7 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     for (const varHead of cur.variationHeads) {
       out.push(`<span class="chess-variation">`);
       out.push(`<span class="chess-variation-paren">(</span>`);
+      out.push(`<button class="chess-promote-btn" data-promote-id="${varHead.id}" title="Promote to main line">⇑</button>`);
       renderLine(varHead, currentId, out, /* firstInLine */ true);
       out.push(`<span class="chess-variation-paren">)</span>`);
       out.push(`</span>`);
@@ -213,4 +214,66 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
 
     cur = cur.next;
   }
+}
+
+// ---------------------------------------------------------------------------
+// attachMove
+// Given the current node and a SAN move just played by the user, either
+// returns an existing node in the tree for that move (mainline or variation)
+// or creates a new node and grafts it onto the tree.
+//
+// Attachment rules:
+//   • current.next exists and matches san → return current.next (already mainline)
+//   • current.next.variationHeads contains a match → return that variation head
+//   • current.next exists but doesn't match → add a new variationHead to current.next
+//   • current.next is null → extend the mainline with a new node
+// ---------------------------------------------------------------------------
+
+export function attachMove(current: MoveNode, san: string, newState: BoardState): MoveNode {
+  const color = current.state.activeColor;
+  const moveNumber = current.state.fullmoveNumber;
+
+  if (current.next) {
+    if (current.next.san === san) return current.next;
+    for (const v of current.next.variationHeads) {
+      if (v.san === san) return v;
+    }
+    // New variation branching from the same parent position as current.next
+    const node = makeNode(san, moveNumber, color, newState, current);
+    current.next.variationHeads.push(node);
+    return node;
+  }
+
+  // Extend the mainline
+  const node = makeNode(san, moveNumber, color, newState, current);
+  current.next = node;
+  return node;
+}
+
+// ---------------------------------------------------------------------------
+// promoteVariation
+// Swaps a variation head with the current mainline move so that the variation
+// becomes the new mainline and the old mainline becomes a variation.
+//
+// Before:  parent → mainNode (variationHeads: [varHead, ...])
+// After:   parent → varHead  (variationHeads: [mainNode, ...])
+//          mainNode loses varHead from its variationHeads
+// ---------------------------------------------------------------------------
+
+export function promoteVariation(varHead: MoveNode): void {
+  const parent = varHead.parent;
+  if (!parent?.next) return;
+
+  const mainNode = parent.next;
+  const idx = mainNode.variationHeads.indexOf(varHead);
+  if (idx === -1) return;
+
+  // Detach varHead from mainNode's variation list
+  mainNode.variationHeads.splice(idx, 1);
+
+  // Old mainline becomes the first variation of varHead
+  varHead.variationHeads.unshift(mainNode);
+
+  // varHead takes over as mainline
+  parent.next = varHead;
 }

@@ -1,9 +1,9 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
-import { parseMultiPGN } from "../core/pgn";
+import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildMoveTree, findNodeById, renderControls } from "../render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
 import {
@@ -158,12 +158,18 @@ function gameLabel(game: PgnGame, index: number): string {
 
 const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
 
+interface InteractiveBoardHandle {
+  getState: () => BoardState;
+  setState: (s: BoardState) => void;
+}
+
 function mountInteractiveBoard(
   wrapper: HTMLElement,
   initialState: BoardState,
   baseConfig: BoardConfig,
-  turnIndicator?: HTMLElement
-): () => BoardState {
+  turnIndicator?: HTMLElement,
+  onMove?: (san: string) => void,
+): InteractiveBoardHandle {
   let state = initialState;
   let selected: number | null = null;
   let legalTargets = new Set<number>();
@@ -338,7 +344,12 @@ function mountInteractiveBoard(
           const move =
             moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
             moves.find(m => m.to === idx);
-          if (move) state = applyMove(state, move.san);
+          if (move) {
+            selected = null;
+            legalTargets = new Set();
+            if (onMove) { onMove(move.san); return; }
+            state = applyMove(state, move.san);
+          }
         }
         selected = null;
         legalTargets = new Set();
@@ -358,9 +369,15 @@ function mountInteractiveBoard(
       const move =
         moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
         moves.find(m => m.to === idx);
-      if (move) state = applyMove(state, move.san);
-      selected = null;
-      legalTargets = new Set();
+      if (move) {
+        selected = null;
+        legalTargets = new Set();
+        if (onMove) { onMove(move.san); return; }
+        state = applyMove(state, move.san);
+      } else {
+        selected = null;
+        legalTargets = new Set();
+      }
     } else {
       const piece = state.board[idx];
       if (piece && piece.color === state.activeColor) {
@@ -416,7 +433,186 @@ function mountInteractiveBoard(
   wrapper.addEventListener("contextmenu", (e) => e.preventDefault());
 
   render();
-  return () => state;
+  return {
+    getState: () => state,
+    setState: (s: BoardState) => { state = s; selected = null; legalTargets = new Set(); render(); },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Viewer position cache
+// When write-back triggers a re-render, the new block processor call restores
+// the user's position rather than dropping them back to the root.
+// Key: "sourcePath:lineStart"  Value: ordered SANs from root → current node
+// ---------------------------------------------------------------------------
+
+const viewerPositionCache = new Map<string, string[]>();
+
+function nodeToPath(node: MoveNode): string[] {
+  const path: string[] = [];
+  let cur: MoveNode | null = node;
+  while (cur !== null && cur.san !== null) {
+    path.unshift(cur.san);
+    cur = cur.parent;
+  }
+  return path;
+}
+
+function pathToNode(root: MoveNode, path: string[]): MoveNode {
+  let cur = root;
+  for (const san of path) {
+    const next = cur.next?.san === san
+      ? cur.next
+      : cur.next?.variationHeads.find(v => v.san === san);
+    if (!next) break;
+    cur = next;
+  }
+  return cur;
+}
+
+// ---------------------------------------------------------------------------
+// PGN write-back
+// Serializes the live MoveNode tree and overwrites the pgn: line in the
+// source file. Silently no-ops when called outside a file context (e.g.
+// hover previews) or when the block has no pgn: key.
+// ---------------------------------------------------------------------------
+
+async function writeBackPgn(
+  app: App,
+  ctx: MarkdownPostProcessorContext,
+  el: HTMLElement,
+  newPgn: string,
+): Promise<void> {
+  const info = ctx.getSectionInfo(el);
+  if (!info) return;
+
+  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
+  if (!(abstract instanceof TFile)) return;
+
+  const content = await app.vault.read(abstract);
+  const lines = content.split("\n");
+
+  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
+    if (/^\s*pgn\s*:/.test(lines[i])) {
+      lines[i] = `pgn: ${newPgn}`;
+      await app.vault.modify(abstract, lines.join("\n"));
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PGN viewer — DOM-stable mount
+// ---------------------------------------------------------------------------
+
+interface PgnViewerHandle {
+  /** Re-render nav + move list (and board if arrows supplied) for a new current node. */
+  update(current: MoveNode, arrows?: EngineArrow[]): void;
+  /** Swap in a completely new tree (e.g. game-selector change). */
+  reset(newRoot: MoveNode, newResult: string): void;
+}
+
+function mountPgnViewer(
+  container: HTMLElement,
+  initialRoot: MoveNode,
+  initialCurrent: MoveNode,
+  config: BoardConfig,
+  result: string,
+  onNavigate: (node: MoveNode) => void,
+): PgnViewerHandle {
+  let root = initialRoot;
+  let current = initialCurrent;
+  let currentResult = result;
+
+  // ── Stable DOM skeleton ──────────────────────────────────────────────────
+  const viewerDiv  = container.createDiv({ cls: "chess-viewer" });
+  const boardWrapperEl = viewerDiv.createDiv({ cls: "chess-board-wrapper" });
+  const navEl      = viewerDiv.createDiv({ cls: "chess-nav" });
+  const prevBtn    = navEl.createEl("button", { text: "←" });
+  const nextBtn    = navEl.createEl("button", { text: "→" });
+  const moveListEl = viewerDiv.createDiv({ cls: "chess-move-list-container" });
+
+  // ── Interactive board (owns board rendering and pointer events) ──────────
+  const boardInteraction = mountInteractiveBoard(
+    boardWrapperEl,
+    initialCurrent.state,
+    config,
+    undefined,
+    (san) => {
+      const newState = applyMove(current.state, san);
+      const newNode = attachMove(current, san, newState);
+      current = newNode;
+      onNavigate(current);
+    },
+  );
+
+  // ── Nav / move-list event listeners — attached once ──────────────────────
+  prevBtn.addEventListener("click", () => {
+    if (current.parent) { current = current.parent; onNavigate(current); }
+  });
+  nextBtn.addEventListener("click", () => {
+    if (current.next) { current = current.next; onNavigate(current); }
+  });
+
+  // Delegated listener on the stable container — survives innerHTML swaps.
+  moveListEl.addEventListener("click", (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+
+    // Promote-variation button
+    const promoteBtn = target.closest<HTMLElement>("[data-promote-id]");
+    if (promoteBtn) {
+      const id = parseInt(promoteBtn.dataset.promoteId ?? "-1", 10);
+      const varHead = findNodeById(root, id);
+      if (varHead) {
+        promoteVariation(varHead);
+        onNavigate(current);
+      }
+      return;
+    }
+
+    // Move token navigation
+    const token = target.closest<HTMLElement>("[data-node-id]");
+    if (!token) return;
+    const id = parseInt(token.dataset.nodeId ?? "-1", 10);
+    const found = findNodeById(root, id);
+    if (found) { current = found; onNavigate(current); }
+  });
+
+  // ── Update helpers ───────────────────────────────────────────────────────
+  function updateNav(node: MoveNode): void {
+    prevBtn.disabled = !node.parent;
+    nextBtn.disabled = !node.next;
+  }
+
+  function updateMoveList(node: MoveNode): void {
+    moveListEl.innerHTML = buildMoveListHtml(root, node.id, currentResult);
+  }
+
+  function update(node: MoveNode, arrows?: EngineArrow[]): void {
+    current = node;
+    if (arrows?.length) {
+      // Engine arrows: render directly so arrow overlay is visible.
+      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, engineArrows: arrows });
+    } else {
+      // Sync interactive board to the new position (also re-renders the board).
+      boardInteraction.setState(node.state);
+    }
+    updateNav(node);
+    updateMoveList(node);
+  }
+
+  function reset(newRoot: MoveNode, newResult: string): void {
+    root = newRoot;
+    currentResult = newResult;
+    current = newRoot;
+    update(newRoot);
+  }
+
+  // Initial nav + move list (board already rendered by mountInteractiveBoard)
+  updateNav(initialCurrent);
+  updateMoveList(initialCurrent);
+
+  return { update, reset };
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +838,7 @@ export default class ChessPlugin extends Plugin {
 
     this.registerMarkdownCodeBlockProcessor(
       "chess",
-      (source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
+      (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
         try {
           const params = parseBlock(source);
 
@@ -669,7 +865,7 @@ export default class ChessPlugin extends Plugin {
             const boardWrapper = container.createDiv({ cls: "chess-board" });
             const turnEl = container.createDiv({ cls: `chess-turn-indicator chess-turn-indicator--${state.activeColor}` });
             turnEl.setText(state.activeColor === "w" ? "White to move" : "Black to move");
-            const getState = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
+            const { getState } = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
 
             if (params.analysis) {
               mountAnalysisPanel(container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this));
@@ -682,62 +878,53 @@ export default class ChessPlugin extends Plugin {
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
-          let root = buildMoveTree(startFen, games[0].moves);
-          let current: MoveNode = root;
+          let root: MoveNode = buildMoveTree(startFen, games[0].moves);
+
+          // Restore position saved before a write-back re-render
+          const sectionInfo = ctx.getSectionInfo(el);
+          const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
+          const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
+          let current: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
+
           const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
           const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
 
           let analysisReset: (() => void) | null = null;
-          let currentArrows: EngineArrow[] = [];
 
-          function render(): void {
-            wrapper.innerHTML = "";
-
-            // Game selector — only shown when the PGN contains more than one game
-            if (games.length > 1) {
-              const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
-              const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
-              games.forEach((g: PgnGame, i: number) => {
-                const opt = select.createEl("option", {
-                  value: String(i),
-                  text: gameLabel(g, i),
-                });
-                if (i === gameIndex) opt.selected = true;
-              });
-              select.addEventListener("change", () => {
-                gameIndex = parseInt(select.value, 10);
-                root = buildMoveTree(startFen, games[gameIndex].moves);
-                current = root;
-                currentArrows = [];
-                analysisReset?.();
-                render();
-              });
-            }
-
-            const viewerDiv = wrapper.createDiv();
-            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result, currentArrows.length ? currentArrows : undefined);
-            attachHandlers(viewerDiv);
-          }
-
-          function attachHandlers(viewerDiv: HTMLElement): void {
-            viewerDiv.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
-              btn.addEventListener("click", () => {
-                const action = btn.dataset.action;
-                if (action === "prev" && current.parent) { current = current.parent; currentArrows = []; analysisReset?.(); render(); }
-                else if (action === "next" && current.next) { current = current.next; currentArrows = []; analysisReset?.(); render(); }
-              });
+          // Game selector — only shown when the PGN contains more than one game
+          if (games.length > 1) {
+            const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
+            const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
+            games.forEach((g: PgnGame, i: number) => {
+              const opt = select.createEl("option", { value: String(i), text: gameLabel(g, i) });
+              if (i === gameIndex) opt.selected = true;
             });
-
-            viewerDiv.querySelectorAll<HTMLElement>("[data-node-id]").forEach((token) => {
-              token.addEventListener("click", () => {
-                const id = parseInt(token.dataset.nodeId ?? "-1", 10);
-                const found = findNodeById(root, id);
-                if (found) { current = found; currentArrows = []; analysisReset?.(); render(); }
-              });
+            select.addEventListener("change", () => {
+              gameIndex = parseInt(select.value, 10);
+              root = buildMoveTree(startFen, games[gameIndex].moves);
+              current = root;
+              analysisReset?.();
+              viewer.reset(root, games[gameIndex].result);
             });
           }
 
-          render();
+          const app = this.app;
+          const viewer = mountPgnViewer(
+            wrapper,
+            root,
+            current,
+            baseConfig,
+            games[gameIndex].result,
+            (node) => {
+              current = node;
+              if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(node));
+              analysisReset?.();
+              viewer.update(node);
+              if (games.length === 1) {
+                writeBackPgn(app, ctx, el, serializeMoveTree(root, games[0].result));
+              }
+            },
+          );
 
           if (params.analysis) {
             const { reset } = mountAnalysisPanel(
@@ -746,7 +933,7 @@ export default class ChessPlugin extends Plugin {
               () => current.state,
               baseConfig,
               this.getEngineWorker.bind(this),
-              (arrows) => { currentArrows = arrows; render(); }
+              (arrows) => { viewer.update(current, arrows); }
             );
             analysisReset = reset;
           }
