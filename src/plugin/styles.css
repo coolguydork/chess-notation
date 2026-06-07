@@ -171,6 +171,35 @@
   white-space: pre-wrap;
 }
 
+/* Turn indicator */
+.chess-turn-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.chess-turn-indicator::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chess-turn-indicator--w::before {
+  background: #fff;
+  border-color: #999;
+}
+
+.chess-turn-indicator--b::before {
+  background: #222;
+  border-color: #222;
+}
+
 /* Analysis panel */
 .chess-analysis-container {
   display: inline-flex;
