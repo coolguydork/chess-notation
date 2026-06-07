@@ -10,12 +10,13 @@ import { positionToUci, parseInfoLine, parseBestMove } from "../core/engine";
 export interface EngineWorkerConfig {
   mode: EngineMode;
   externalPath?: string; // explicit binary path; auto-discovered when absent
-  wasmDir?: string;      // directory containing stockfish-18-lite-single.{js,wasm}
+  wasmDir?: string;      // directory containing the WASM engine files
+  wasmJs?: string;       // JS loader filename (default "stockfish-18-lite-single.js")
   multiPV?: number;      // default 3
   depth?: number;        // default 20
 }
 
-const STOCKFISH_JS = "stockfish-18-lite-single.js";
+const DEFAULT_WASM_JS = "stockfish-18-lite-single.js";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -138,26 +139,58 @@ type ChildProcess = {
   kill: () => void;
 };
 
+// Well-known install locations for common UCI engines (Stockfish is most prevalent).
+// Only consulted when no explicit path is configured.
 const DEFAULT_SEARCH_PATHS = [
   "/usr/local/bin/stockfish",
   "/usr/bin/stockfish",
   "/opt/homebrew/bin/stockfish",
-  "stockfish", // on PATH
+  "stockfish",
 ];
 
-async function findExternalBinary(explicit?: string): Promise<string | null> {
-  // Node's child_process is accessed via require inside Obsidian's renderer
+/** Probe a candidate binary by running a real UCI handshake (uci → uciok). */
+async function probeUciBinary(candidate: string): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { execFile } = (globalThis as any).require("child_process") as typeof import("child_process");
-  const candidates = explicit ? [explicit] : DEFAULT_SEARCH_PATHS;
+  const { spawn } = (globalThis as any).require("child_process") as typeof import("child_process");
+  return new Promise<boolean>((resolve) => {
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(candidate, [], { stdio: "pipe" });
+    } catch {
+      resolve(false);
+      return;
+    }
 
-  for (const candidate of candidates) {
-    const found = await new Promise<boolean>((resolve) => {
-      execFile(candidate, ["--version"], { timeout: 2000 }, (err: unknown) => {
-        resolve(!err);
-      });
+    let output = "";
+    let done = false;
+    const finish = (result: boolean): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { proc.stdin?.write("quit\n"); } catch { /* ignore */ }
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish(false), 3000);
+    proc.stdout?.on("data", (chunk: Buffer | string) => {
+      output += chunk.toString();
+      if (output.includes("uciok")) finish(true);
     });
-    if (found) return candidate;
+    proc.on("error", () => finish(false));
+    proc.on("close", () => finish(false));
+
+    if (proc.stdin) {
+      try { proc.stdin.write("uci\n"); } catch { finish(false); }
+    } else {
+      finish(false);
+    }
+  });
+}
+
+async function findExternalBinary(explicit?: string): Promise<string | null> {
+  const candidates = explicit ? [explicit] : DEFAULT_SEARCH_PATHS;
+  for (const candidate of candidates) {
+    if (await probeUciBinary(candidate)) return candidate;
   }
   return null;
 }
@@ -184,6 +217,7 @@ export class EngineWorker {
       mode: config.mode,
       externalPath: config.externalPath ?? "",
       wasmDir: config.wasmDir ?? "",
+      wasmJs: config.wasmJs ?? DEFAULT_WASM_JS,
       multiPV: config.multiPV ?? 3,
       depth: config.depth ?? 20,
     };
@@ -201,7 +235,7 @@ export class EngineWorker {
       const nodePath = (globalThis as any).require("path") as typeof import("path");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fs = (globalThis as any).require("fs") as typeof import("fs");
-      const jsPath = nodePath.join(this.config.wasmDir, STOCKFISH_JS);
+      const jsPath = nodePath.join(this.config.wasmDir, this.config.wasmJs);
       return fs.existsSync(jsPath);
     }
     const path = await findExternalBinary(this.config.externalPath || undefined);
@@ -218,12 +252,17 @@ export class EngineWorker {
     const req = (globalThis as any).require as NodeRequire;
     const nodePath = req("path") as typeof import("path");
     const wasmDir = this.config.wasmDir;
-    const wasmPath = nodePath.join(wasmDir, "stockfish-18-lite-single.wasm");
+    const wasmJs = this.config.wasmJs;
+    // Derive the .wasm filename from the .js filename; override with a separate
+    // config key if a future WASM engine uses a different naming convention.
+    const wasmBin = wasmJs.replace(/\.js$/, ".wasm");
+    const wasmPath = nodePath.join(wasmDir, wasmBin);
 
-    // The stockfish JS exports an outer factory; calling it returns the inner
+    // The JS file exports an outer factory; calling it returns the inner
     // Emscripten factory. Calling the inner factory with a config object extends
     // that object in-place with the full WASM module (ccall, _isReady, etc).
-    const outerFactory = req(nodePath.join(wasmDir, STOCKFISH_JS)) as () => (cfg: object) => Promise<void>;
+    // NOTE: this loading strategy is specific to Stockfish's Emscripten build.
+    const outerFactory = req(nodePath.join(wasmDir, wasmJs)) as () => (cfg: object) => Promise<void>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const engine: any = {
       // The Emscripten module internally requests "stockfish.wasm" (hardcoded).
@@ -297,7 +336,7 @@ export class EngineWorker {
 
     if (!this.binaryPath) {
       const path = await findExternalBinary(this.config.externalPath || undefined);
-      if (!path) throw new Error("Stockfish binary not found");
+      if (!path) throw new Error("UCI engine binary not found");
       this.binaryPath = path;
     }
 

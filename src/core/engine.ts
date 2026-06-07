@@ -70,7 +70,7 @@ function extractTokens(tokens: string[], key: string): string[] {
   return result;
 }
 
-/** Parse a Stockfish `info` line. Returns null if it's not a pv-bearing info line. */
+/** Parse a UCI `info` line. Returns null if it's not a pv-bearing info line. */
 export function parseInfoLine(line: string): EngineMove | null {
   if (!line.startsWith("info ")) return null;
 
