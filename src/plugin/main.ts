@@ -169,6 +169,13 @@ function mountInteractiveBoard(
   let userArrows: UserArrow[] = [];
   let rightDragStart: number | null = null;
 
+  // Drag state
+  let dragSource: number | null = null;
+  let dragGhost: HTMLImageElement | null = null;
+  let dragMoved = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+
   function render(): void {
     const config: BoardConfig = {
       ...baseConfig,
@@ -177,6 +184,13 @@ function mountInteractiveBoard(
       userArrows: userArrows.length > 0 ? userArrows : undefined,
     };
     wrapper.innerHTML = renderBoard(state, config);
+  }
+
+  function removeGhost(): void {
+    if (dragGhost) {
+      dragGhost.remove();
+      dragGhost = null;
+    }
   }
 
   // Show a floating comment input near the midpoint of the most-recently drawn arrow.
@@ -251,12 +265,85 @@ function mountInteractiveBoard(
     });
   }
 
-  // Left-click move handling
-  wrapper.addEventListener("pointerup", (e) => {
+  // Left pointer down — begin drag if clicking a friendly piece
+  wrapper.addEventListener("pointerdown", (e: PointerEvent) => {
     if (e.button !== 0) return;
     const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
     if (idx === null) return;
+    const piece = state.board[idx];
+    if (!piece || piece.color !== state.activeColor) return;
 
+    dragSource = idx;
+    dragMoved = false;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+
+    // Show legal move dots immediately
+    selected = idx;
+    legalTargets = new Set(getSquareLegalMoves(state, idx).map(m => m.to));
+    render();
+
+    // Create ghost image
+    const svg = wrapper.querySelector("svg.chess-board-svg");
+    const rect = svg ? svg.getBoundingClientRect() : wrapper.getBoundingClientRect();
+    const scale = rect.width / (baseConfig.squareSize * 8);
+    const ghostSize = Math.round(baseConfig.squareSize * scale);
+
+    const ghost = document.createElement("img");
+    ghost.src = baseConfig.resolvePieceUrl(piece);
+    ghost.style.cssText = `position:fixed;width:${ghostSize}px;height:${ghostSize}px;` +
+      `pointer-events:none;z-index:10000;opacity:0.85;` +
+      `left:${e.clientX - ghostSize / 2}px;top:${e.clientY - ghostSize / 2}px;`;
+    document.body.appendChild(ghost);
+    dragGhost = ghost;
+
+    wrapper.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  // Pointer move — update ghost position
+  wrapper.addEventListener("pointermove", (e: PointerEvent) => {
+    if (dragSource === null || !dragGhost) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    if (!dragMoved && Math.sqrt(dx * dx + dy * dy) > 4) dragMoved = true;
+    const ghostSize = parseInt(dragGhost.style.width, 10);
+    dragGhost.style.left = `${e.clientX - ghostSize / 2}px`;
+    dragGhost.style.top  = `${e.clientY - ghostSize / 2}px`;
+  });
+
+  // Left-click / drag-drop move handling
+  wrapper.addEventListener("pointerup", (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const idx = squareFromEvent(e, baseConfig.squareSize, baseConfig.orientation);
+
+    if (dragSource !== null) {
+      removeGhost();
+      const src = dragSource;
+      dragSource = null;
+
+      if (dragMoved) {
+        // Drag release — attempt move to destination
+        if (idx !== null && legalTargets.has(idx)) {
+          const moves = getSquareLegalMoves(state, src);
+          const move =
+            moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
+            moves.find(m => m.to === idx);
+          if (move) state = applyMove(state, move.san);
+        }
+        selected = null;
+        legalTargets = new Set();
+        render();
+        return;
+      }
+
+      // Tiny movement — treat as a click; legal dots already showing, wait for next click
+      // (fall through: state already rendered with selection on pointerdown)
+      return;
+    }
+
+    // No drag in progress — handle second click of click-to-move
+    if (idx === null) return;
     if (selected !== null && legalTargets.has(idx)) {
       const moves = getSquareLegalMoves(state, selected);
       const move =
@@ -337,14 +424,21 @@ function uciToArrow(uciMove: string, color: string): EngineArrow {
 
 function mountAnalysisPanel(
   container: HTMLElement,
-  boardWrapper: HTMLElement,
+  boardWrapper: HTMLElement | null,
   getState: () => BoardState,
   baseConfig: BoardConfig,
-  getWorker: () => EngineWorker
-): void {
+  getWorker: () => EngineWorker,
+  onArrows?: (arrows: EngineArrow[]) => void
+): { reset: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
   const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyse-btn" });
   const output = panel.createDiv({ cls: "chess-analysis-output" });
+
+  function reset(): void {
+    btn.disabled = false;
+    btn.textContent = "Analyze";
+    output.empty();
+  }
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -356,11 +450,14 @@ function mountAnalysisPanel(
       const state = getState();
       const result = await worker.analyse(state, []);
 
-      // Draw arrows for each top move
       const arrows: EngineArrow[] = result.moves.map((m, i) =>
         uciToArrow(m.uci, ARROW_COLORS[i] ?? ARROW_COLORS[ARROW_COLORS.length - 1])
       );
-      boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
+
+      if (boardWrapper) {
+        boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
+      }
+      onArrows?.(arrows);
 
       // Show eval list
       for (const move of result.moves) {
@@ -378,6 +475,8 @@ function mountAnalysisPanel(
       btn.disabled = false;
     }
   });
+
+  return { reset };
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +673,11 @@ export default class ChessPlugin extends Plugin {
           let gameIndex = 0;
           let root = buildMoveTree(startFen, games[0].moves);
           let current: MoveNode = root;
-          const wrapper = el.createDiv({ cls: "chess-viewer-wrapper" });
+          const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
+          const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
+
+          let analysisReset: (() => void) | null = null;
+          let currentArrows: EngineArrow[] = [];
 
           function render(): void {
             wrapper.innerHTML = "";
@@ -594,12 +697,14 @@ export default class ChessPlugin extends Plugin {
                 gameIndex = parseInt(select.value, 10);
                 root = buildMoveTree(startFen, games[gameIndex].moves);
                 current = root;
+                currentArrows = [];
+                analysisReset?.();
                 render();
               });
             }
 
             const viewerDiv = wrapper.createDiv();
-            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result);
+            viewerDiv.innerHTML = renderControls(root, current, baseConfig, games[gameIndex].result, currentArrows.length ? currentArrows : undefined);
             attachHandlers(viewerDiv);
           }
 
@@ -607,8 +712,8 @@ export default class ChessPlugin extends Plugin {
             viewerDiv.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
               btn.addEventListener("click", () => {
                 const action = btn.dataset.action;
-                if (action === "prev" && current.parent) { current = current.parent; render(); }
-                else if (action === "next" && current.next) { current = current.next; render(); }
+                if (action === "prev" && current.parent) { current = current.parent; currentArrows = []; analysisReset?.(); render(); }
+                else if (action === "next" && current.next) { current = current.next; currentArrows = []; analysisReset?.(); render(); }
               });
             });
 
@@ -616,12 +721,24 @@ export default class ChessPlugin extends Plugin {
               token.addEventListener("click", () => {
                 const id = parseInt(token.dataset.nodeId ?? "-1", 10);
                 const found = findNodeById(root, id);
-                if (found) { current = found; render(); }
+                if (found) { current = found; currentArrows = []; analysisReset?.(); render(); }
               });
             });
           }
 
           render();
+
+          if (params.analysis) {
+            const { reset } = mountAnalysisPanel(
+              outerContainer,
+              null,
+              () => current.state,
+              baseConfig,
+              this.getEngineWorker.bind(this),
+              (arrows) => { currentArrows = arrows; render(); }
+            );
+            analysisReset = reset;
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           el.createEl("pre", { text: `Chess error: ${msg}`, cls: "chess-error" });

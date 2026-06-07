@@ -141,9 +141,10 @@ export function renderControls(
   root: MoveNode,
   current: MoveNode,
   config: BoardConfig,
-  result?: string
+  result?: string,
+  engineArrows?: import("./config").EngineArrow[]
 ): string {
-  const boardSvg = renderBoard(current.state, config);
+  const boardSvg = renderBoard(current.state, engineArrows ? { ...config, engineArrows } : config);
 
   const prevDisabled = !current.parent ? " disabled" : "";
   const nextDisabled = !current.next   ? " disabled" : "";
