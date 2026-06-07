@@ -3,7 +3,7 @@ import { load as parseYaml } from "js-yaml";
 import { parseFEN } from "../core/fen";
 import { parseMultiPGN } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
-import { buildMoveTree, findNodeById, buildMoveListHtml } from "../render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove } from "../render/controls";
 import { getSquareLegalMoves } from "../core/legal";
 import { applyMove } from "../core/moves";
 import {
@@ -158,12 +158,18 @@ function gameLabel(game: PgnGame, index: number): string {
 
 const USER_ARROW_COLOR = "rgba(220,80,20,0.82)";
 
+interface InteractiveBoardHandle {
+  getState: () => BoardState;
+  setState: (s: BoardState) => void;
+}
+
 function mountInteractiveBoard(
   wrapper: HTMLElement,
   initialState: BoardState,
   baseConfig: BoardConfig,
-  turnIndicator?: HTMLElement
-): () => BoardState {
+  turnIndicator?: HTMLElement,
+  onMove?: (san: string) => void,
+): InteractiveBoardHandle {
   let state = initialState;
   let selected: number | null = null;
   let legalTargets = new Set<number>();
@@ -338,7 +344,12 @@ function mountInteractiveBoard(
           const move =
             moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
             moves.find(m => m.to === idx);
-          if (move) state = applyMove(state, move.san);
+          if (move) {
+            selected = null;
+            legalTargets = new Set();
+            if (onMove) { onMove(move.san); return; }
+            state = applyMove(state, move.san);
+          }
         }
         selected = null;
         legalTargets = new Set();
@@ -358,9 +369,15 @@ function mountInteractiveBoard(
       const move =
         moves.find(m => m.to === idx && m.promotion !== "n" && m.promotion !== "b" && m.promotion !== "r") ??
         moves.find(m => m.to === idx);
-      if (move) state = applyMove(state, move.san);
-      selected = null;
-      legalTargets = new Set();
+      if (move) {
+        selected = null;
+        legalTargets = new Set();
+        if (onMove) { onMove(move.san); return; }
+        state = applyMove(state, move.san);
+      } else {
+        selected = null;
+        legalTargets = new Set();
+      }
     } else {
       const piece = state.board[idx];
       if (piece && piece.color === state.activeColor) {
@@ -416,7 +433,10 @@ function mountInteractiveBoard(
   wrapper.addEventListener("contextmenu", (e) => e.preventDefault());
 
   render();
-  return () => state;
+  return {
+    getState: () => state,
+    setState: (s: BoardState) => { state = s; selected = null; legalTargets = new Set(); render(); },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -424,9 +444,7 @@ function mountInteractiveBoard(
 // ---------------------------------------------------------------------------
 
 interface PgnViewerHandle {
-  /** The stable board wrapper element — chunk 2b will mount interactive events here. */
-  boardWrapperEl: HTMLElement;
-  /** Re-render board + nav + move list for a new current node. */
+  /** Re-render nav + move list (and board if arrows supplied) for a new current node. */
   update(current: MoveNode, arrows?: EngineArrow[]): void;
   /** Swap in a completely new tree (e.g. game-selector change). */
   reset(newRoot: MoveNode, newResult: string): void;
@@ -445,14 +463,28 @@ function mountPgnViewer(
   let currentResult = result;
 
   // ── Stable DOM skeleton ──────────────────────────────────────────────────
-  const viewerDiv    = container.createDiv({ cls: "chess-viewer" });
+  const viewerDiv  = container.createDiv({ cls: "chess-viewer" });
   const boardWrapperEl = viewerDiv.createDiv({ cls: "chess-board-wrapper" });
-  const navEl        = viewerDiv.createDiv({ cls: "chess-nav" });
-  const prevBtn      = navEl.createEl("button", { text: "←" });
-  const nextBtn      = navEl.createEl("button", { text: "→" });
-  const moveListEl   = viewerDiv.createDiv({ cls: "chess-move-list-container" });
+  const navEl      = viewerDiv.createDiv({ cls: "chess-nav" });
+  const prevBtn    = navEl.createEl("button", { text: "←" });
+  const nextBtn    = navEl.createEl("button", { text: "→" });
+  const moveListEl = viewerDiv.createDiv({ cls: "chess-move-list-container" });
 
-  // ── Event listeners — attached once ─────────────────────────────────────
+  // ── Interactive board (owns board rendering and pointer events) ──────────
+  const boardInteraction = mountInteractiveBoard(
+    boardWrapperEl,
+    initialCurrent.state,
+    config,
+    undefined,
+    (san) => {
+      const newState = applyMove(current.state, san);
+      const newNode = attachMove(current, san, newState);
+      current = newNode;
+      onNavigate(current);
+    },
+  );
+
+  // ── Nav / move-list event listeners — attached once ──────────────────────
   prevBtn.addEventListener("click", () => {
     if (current.parent) { current = current.parent; onNavigate(current); }
   });
@@ -460,8 +492,7 @@ function mountPgnViewer(
     if (current.next) { current = current.next; onNavigate(current); }
   });
 
-  // Delegated listener — survives move-list innerHTML swaps because it sits
-  // on the stable container above the swapped content.
+  // Delegated listener on the stable container — survives innerHTML swaps.
   moveListEl.addEventListener("click", (e: MouseEvent) => {
     const token = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]");
     if (!token) return;
@@ -471,11 +502,6 @@ function mountPgnViewer(
   });
 
   // ── Update helpers ───────────────────────────────────────────────────────
-  function updateBoard(node: MoveNode, arrows?: EngineArrow[]): void {
-    const cfg: BoardConfig = arrows?.length ? { ...config, engineArrows: arrows } : config;
-    boardWrapperEl.innerHTML = renderBoard(node.state, cfg);
-  }
-
   function updateNav(node: MoveNode): void {
     prevBtn.disabled = !node.parent;
     nextBtn.disabled = !node.next;
@@ -487,7 +513,13 @@ function mountPgnViewer(
 
   function update(node: MoveNode, arrows?: EngineArrow[]): void {
     current = node;
-    updateBoard(node, arrows);
+    if (arrows?.length) {
+      // Engine arrows: render directly so arrow overlay is visible.
+      boardWrapperEl.innerHTML = renderBoard(node.state, { ...config, engineArrows: arrows });
+    } else {
+      // Sync interactive board to the new position (also re-renders the board).
+      boardInteraction.setState(node.state);
+    }
     updateNav(node);
     updateMoveList(node);
   }
@@ -499,10 +531,11 @@ function mountPgnViewer(
     update(newRoot);
   }
 
-  // Initial render
-  update(initialCurrent);
+  // Initial nav + move list (board already rendered by mountInteractiveBoard)
+  updateNav(initialCurrent);
+  updateMoveList(initialCurrent);
 
-  return { boardWrapperEl, update, reset };
+  return { update, reset };
 }
 
 // ---------------------------------------------------------------------------
@@ -755,7 +788,7 @@ export default class ChessPlugin extends Plugin {
             const boardWrapper = container.createDiv({ cls: "chess-board" });
             const turnEl = container.createDiv({ cls: `chess-turn-indicator chess-turn-indicator--${state.activeColor}` });
             turnEl.setText(state.activeColor === "w" ? "White to move" : "Black to move");
-            const getState = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
+            const { getState } = mountInteractiveBoard(boardWrapper, state, baseConfig, turnEl);
 
             if (params.analysis) {
               mountAnalysisPanel(container, boardWrapper, getState, baseConfig, this.getEngineWorker.bind(this));
