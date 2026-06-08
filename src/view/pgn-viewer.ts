@@ -1,7 +1,7 @@
 import { buildMoveListHtml } from "../render/controls";
 import { findNodeById, attachMove, promoteVariation, nodeToPath, pathToNode } from "../core/tree";
 import { mountCmBoard } from "./cm-board";
-import type { InteractiveBoardHandle } from "./interactive-board";
+import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
 import type { BoardConfig, EngineArrow } from "../render/config";
 import type { PvMove } from "../core/engine";

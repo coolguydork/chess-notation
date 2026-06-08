@@ -141,3 +141,10 @@ export function serializeFEN(state: BoardState): string {
     state.fullmoveNumber,
   ].join(" ");
 }
+
+/** Convert an algebraic square string ("e2") to a board index (0–63, a8=0). */
+export function uciSquareToIndex(sq: string): number {
+  const file = sq.charCodeAt(0) - 97; // 'a'=0
+  const rank = parseInt(sq[1], 10) - 1; // '1'=0
+  return (7 - rank) * 8 + file;
+}

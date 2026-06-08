@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMoveTree, findNodeById, renderControls, attachMove, promoteVariation } from "../../src/render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../../src/render/controls";
 import { applyMove } from "../../src/core/moves";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
@@ -212,82 +212,52 @@ describe("findNodeById", () => {
   });
 });
 
-// ─── renderControls ───────────────────────────────────────────────────────────
+// ─── buildMoveListHtml ──────────────────────────────────────────────────────
 
-describe("renderControls", () => {
+describe("buildMoveListHtml", () => {
   const root = buildMoveTree(STARTING_FEN, italianMoves);
   const e4 = root.next!;
 
   it("returns a non-empty HTML string", () => {
-    expect(typeof renderControls(root, root, testConfig)).toBe("string");
-    expect(renderControls(root, root, testConfig).length).toBeGreaterThan(0);
-  });
-
-  it("includes an <svg> board", () => {
-    expect(renderControls(root, root, testConfig)).toContain("<svg ");
-  });
-
-  it("includes prev and next buttons", () => {
-    const html = renderControls(root, root, testConfig);
-    expect(html).toContain("data-action=\"prev\"");
-    expect(html).toContain("data-action=\"next\"");
-  });
-
-  it("prev is disabled at root (no parent)", () => {
-    const m = renderControls(root, root, testConfig).match(/data-action="prev"[^>]*>/);
-    expect(m![0]).toContain("disabled");
-  });
-
-  it("next is disabled at the last main-line node (no next)", () => {
-    let last = root.next!;
-    while (last.next) last = last.next;
-    const m = renderControls(root, last, testConfig).match(/data-action="next"[^>]*>/);
-    expect(m![0]).toContain("disabled");
-  });
-
-  it("neither button is disabled at an intermediate node", () => {
-    const html = renderControls(root, e4, testConfig);
-    expect(html.match(/data-action="prev"[^>]*>/)![0]).not.toContain("disabled");
-    expect(html.match(/data-action="next"[^>]*>/)![0]).not.toContain("disabled");
+    expect(typeof buildMoveListHtml(root, root.id)).toBe("string");
+    expect(buildMoveListHtml(root, root.id).length).toBeGreaterThan(0);
   });
 
   it("renders all main-line moves in the move list", () => {
-    const html = renderControls(root, root, testConfig);
+    const html = buildMoveListHtml(root, root.id);
     ["e4", "e5", "Nf3", "Nc6", "Bc4"].forEach(san => expect(html).toContain(san));
   });
 
   it("renders move numbers in the move list", () => {
-    const html = renderControls(root, root, testConfig);
+    const html = buildMoveListHtml(root, root.id);
     expect(html).toContain("1.");
     expect(html).toContain("2.");
     expect(html).toContain("3.");
   });
 
   it("uses data-node-id for move tokens", () => {
-    expect(renderControls(root, root, testConfig)).toContain("data-node-id=");
+    expect(buildMoveListHtml(root, root.id)).toContain("data-node-id=");
   });
 
   it("marks the current node with data-active", () => {
-    expect(renderControls(root, e4, testConfig)).toContain("data-active=\"true\"");
+    expect(buildMoveListHtml(root, e4.id)).toContain("data-active=\"true\"");
   });
 
   it("no move is marked active when current is root", () => {
-    expect(renderControls(root, root, testConfig)).not.toContain("data-active=\"true\"");
+    expect(buildMoveListHtml(root, root.id)).not.toContain("data-active=\"true\"");
   });
 
   it("renders the result token when provided", () => {
-    expect(renderControls(root, root, testConfig, "1-0")).toContain("1-0");
+    expect(buildMoveListHtml(root, root.id, "1-0")).toContain("1-0");
   });
 
   it("omits the result token when not provided", () => {
-    expect(renderControls(root, root, testConfig)).not.toContain("1-0");
+    expect(buildMoveListHtml(root, root.id)).not.toContain("1-0");
   });
 
-  it("renders correctly for FEN-only (no moves)", () => {
+  it("renders no move tokens for FEN-only (no moves)", () => {
     const emptyRoot = buildMoveTree(STARTING_FEN, []);
-    const html = renderControls(emptyRoot, emptyRoot, testConfig);
-    expect(html).toContain("<svg ");
-    expect(html).not.toContain("data-node-id");
+    expect(buildMoveListHtml(emptyRoot, emptyRoot.id)).not.toContain("data-node-id");
   });
 
   describe("variation rendering", () => {
@@ -300,7 +270,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("d4");
       expect(html).toContain("d5");
       expect(html).toContain("chess-variation");
@@ -315,7 +285,7 @@ describe("renderControls", () => {
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
       const d4Node = r.next!.variationHeads[0];
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain(`data-node-id="${d4Node.id}"`);
     });
 
@@ -328,7 +298,7 @@ describe("renderControls", () => {
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
       const d4Node = r.next!.variationHeads[0];
-      const html = renderControls(r, d4Node, testConfig);
+      const html = buildMoveListHtml(r, d4Node.id);
       expect(html).toContain("data-active=\"true\"");
     });
 
@@ -344,7 +314,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("d4");
       expect(html).toContain("c4");
       expect(html).toContain("d5");
@@ -358,7 +328,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b", nags: [2] }, // ?
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("chess-nags");
       expect(html).toContain("!");
       expect(html).toContain("?");
@@ -370,7 +340,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b", nags: [5] },  // !?
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("!!");
       expect(html).toContain("!?");
     });
@@ -380,7 +350,7 @@ describe("renderControls", () => {
         { san: "e4", moveNumber: 1, color: "w", nags: [99] },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("$99");
     });
 
@@ -389,13 +359,13 @@ describe("renderControls", () => {
         { san: "e4", moveNumber: 1, color: "w", nags: [16] }, // ±
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("±");
     });
 
     it("omits chess-nags span when move has no NAGs", () => {
       const r = buildMoveTree(STARTING_FEN, italianMoves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).not.toContain("chess-nags");
     });
 
@@ -407,7 +377,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("chess-nags");
       expect(html).toContain("!");
     });
@@ -420,7 +390,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b", comment: "This is a mistake" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("chess-comment");
       expect(html).toContain("This is a mistake");
     });
@@ -430,14 +400,14 @@ describe("renderControls", () => {
         { san: "e4", moveNumber: 1, color: "w", comment: "a<b>&c" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("a&lt;b&gt;&amp;c");
       expect(html).not.toContain("a<b>");
     });
 
     it("omits chess-comment span when move has no comment", () => {
       const r = buildMoveTree(STARTING_FEN, italianMoves);
-      expect(renderControls(r, r, testConfig)).not.toContain("chess-comment");
+      expect(buildMoveListHtml(r, r.id)).not.toContain("chess-comment");
     });
 
     it("renders comment after NAGs when both are present", () => {
@@ -445,7 +415,7 @@ describe("renderControls", () => {
         { san: "e4", moveNumber: 1, color: "w", nags: [1], comment: "Strong move" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       const nagsPos = html.indexOf("chess-nags");
       const commentPos = html.indexOf("chess-comment");
       expect(nagsPos).toBeGreaterThan(-1);
@@ -460,7 +430,7 @@ describe("renderControls", () => {
         { san: "e5", moveNumber: 1, color: "b" },
       ];
       const r = buildMoveTree(STARTING_FEN, moves);
-      const html = renderControls(r, r, testConfig);
+      const html = buildMoveListHtml(r, r.id);
       expect(html).toContain("Queens pawn");
       expect(html).toContain("chess-comment");
     });

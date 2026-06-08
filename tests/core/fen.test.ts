@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFEN, serializeFEN } from "../../src/core/fen";
+import { parseFEN, serializeFEN, uciSquareToIndex } from "../../src/core/fen";
 import type { BoardState } from "../../src/core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -139,4 +139,13 @@ describe("serializeFEN", () => {
     const fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
     expect(serializeFEN(parseFEN(fen))).toBe(fen);
   });
+});
+
+describe("uciSquareToIndex", () => {
+  it("converts a1 to index 56", () => expect(uciSquareToIndex("a1")).toBe(56));
+  it("converts h1 to index 63", () => expect(uciSquareToIndex("h1")).toBe(63));
+  it("converts a8 to index 0",  () => expect(uciSquareToIndex("a8")).toBe(0));
+  it("converts h8 to index 7",  () => expect(uciSquareToIndex("h8")).toBe(7));
+  it("converts e2 to index 52", () => expect(uciSquareToIndex("e2")).toBe(52));
+  it("converts e4 to index 36", () => expect(uciSquareToIndex("e4")).toBe(36));
 });

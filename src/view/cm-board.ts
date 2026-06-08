@@ -9,7 +9,7 @@ import { applyMoveEx } from "../core/moves";
 import type { BoardState } from "../core/types";
 import type { LegalMove } from "../core/legal";
 import type { BoardConfig, EngineArrow } from "../render/config";
-import type { InteractiveBoardHandle } from "./interactive-board";
+import type { InteractiveBoardHandle } from "./board-handle";
 
 // ---------------------------------------------------------------------------
 // Board rendering, animation, and interaction backed by cm-chessboard (MIT,
