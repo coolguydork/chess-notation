@@ -19,7 +19,7 @@ interface PgnViewerState {
   engineArrows: EngineArrow[];
 }
 
-export type ChangeReason = "navigate" | "move" | "promote" | "load-game";
+export type ChangeReason = "navigate" | "move" | "promote" | "load-game" | "flip";
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -82,6 +82,12 @@ export class PgnViewer {
     this.navNextEl = document.createElement("button");
     this.navNextEl.textContent = "→";
     navEl.appendChild(this.navNextEl);
+
+    const navFlipEl = document.createElement("button");
+    navFlipEl.textContent = "⇆";
+    navFlipEl.title = "Flip board";
+    navEl.appendChild(navFlipEl);
+    navFlipEl.onclick = () => this.flipOrientation();
 
     this.turnIndicatorEl = document.createElement("div");
     this.turnIndicatorEl.className = "chess-turn-indicator";
@@ -244,6 +250,19 @@ export class PgnViewer {
     this.state = { ...this.state, current: p, engineArrows: [] };
     this.render();
     this.emit("navigate");
+  }
+
+  flipOrientation(): void {
+    this.config.orientation = this.config.orientation === "white" ? "black" : "white";
+    this.clearHover();
+    const cur = this.state.current;
+    const lm = cur.from >= 0 ? { from: cur.from, to: cur.to } : undefined;
+    this.board.setState(cur.state, lm);
+    this.emit("flip");
+  }
+
+  getOrientation(): "white" | "black" {
+    return this.config.orientation;
   }
 
   commitMove(san: string, from: number, to: number, newState: BoardState): void {

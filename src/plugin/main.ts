@@ -217,6 +217,36 @@ async function writeBackFenBlock(
   await app.vault.modify(abstract, lines.join("\n"));
 }
 
+// Write-back for orientation changes: updates the `orientation:` line in the
+// block if it exists, otherwise inserts it right after the opening fence.
+async function writeBackOrientation(
+  app: App,
+  ctx: MarkdownPostProcessorContext,
+  el: HTMLElement,
+  orientation: "white" | "black",
+): Promise<void> {
+  const info = ctx.getSectionInfo(el);
+  if (!info) return;
+
+  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
+  if (!(abstract instanceof TFile)) return;
+
+  const content = await app.vault.read(abstract);
+  const lines = content.split("\n");
+
+  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
+    if (/^\s*orientation\s*:/.test(lines[i])) {
+      lines[i] = `orientation: ${orientation}`;
+      await app.vault.modify(abstract, lines.join("\n"));
+      return;
+    }
+  }
+
+  // No orientation: line yet — insert right after the opening fence
+  lines.splice(info.lineStart + 1, 0, `orientation: ${orientation}`);
+  await app.vault.modify(abstract, lines.join("\n"));
+}
+
 // ---------------------------------------------------------------------------
 // PgnViewerChild — Obsidian lifecycle wrapper
 // ---------------------------------------------------------------------------
@@ -625,6 +655,11 @@ export default class ChessPlugin extends Plugin {
               writeBackFenBlock(appRef, ctx, el, serializeMoveTree(e.root, "*"));
             });
 
+            viewer.onChange((e) => {
+              if (e.reason !== "flip") return;
+              writeBackOrientation(appRef, ctx, el, viewer.getOrientation());
+            });
+
             let analysisFenReset: (() => void) | null = null;
 
             viewer.onChange((e) => {
@@ -703,6 +738,11 @@ export default class ChessPlugin extends Plugin {
             if (e.reason !== "move" && e.reason !== "promote") return;
             if (games.length !== 1) return;
             writeBackPgn(app, ctx, el, serializeMoveTree(e.root, games[0].result));
+          });
+
+          viewer.onChange((e) => {
+            if (e.reason !== "flip") return;
+            writeBackOrientation(app, ctx, el, viewer.getOrientation());
           });
 
           let analysisReset: (() => void) | null = null;
