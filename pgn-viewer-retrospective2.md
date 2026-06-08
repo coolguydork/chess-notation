@@ -50,30 +50,38 @@ do the job (one is already resolved).
 
 | # | Component | Hand-rolled (files · LOC) | Library | Case |
 |---|---|---|---|---|
-| 1 | **Rules engine** — FEN, move application, legal moves | `core/fen.ts` 143 · `core/moves.ts` 334 · `core/legal.ts` 415 (+ `types.ts`) ≈ **890** | **chessops** (Lichess; TS-native, immutable) or **chess.js** | Strong — most correctness-critical and bug-prone surface |
-| 2 | **PGN parse/serialize** | `core/pgn.ts` 349 (+ tree builders `core/tree.ts` 191) | **chessops/pgn** or **@mliebelt/pgn-parser** | Strongest / most actionable — a text format, not chess logic |
-| 3 | **Board render + interaction + animation** | `render/board.ts` 274 · `view/interactive-board.ts` 422 · `view/animation.ts` 60 ≈ **756** | **chessground** (Lichess board UI) | Real but highest-effort; architectural mismatch (SVG vs. CSS/DOM) |
+| 1 | **Rules engine** — FEN, move application, legal moves | `core/fen.ts` 143 · `core/moves.ts` 334 · `core/legal.ts` 415 (+ `types.ts`) ≈ **890** | **chess.js** (BSD) ✅ chosen | Strong — most correctness-critical and bug-prone surface |
+| 2 | **PGN parse/serialize** | `core/pgn.ts` 349 (+ tree builders `core/tree.ts` 191) | **@mliebelt/pgn-parser** (Apache) ✅ chosen | Strongest / most actionable — a text format, not chess logic |
+| 3 | **Board render + interaction + animation** | `render/board.ts` 274 · `view/interactive-board.ts` 422 · `view/animation.ts` 60 ≈ **756** | **cm-chessboard** (MIT, SVG) | **Candidate** — MIT + SVG matches our renderer; `chessground` rejected (GPL + CSS/DOM mismatch) |
 | 4 | **UCI protocol glue** — parse `info`/`bestmove`/`option`, build commands, SAN↔UCI | `core/engine.ts` 228 · `plugin/engine-worker.ts` 464 ≈ **690** | (none strong) | **Keep** — see below |
 | 5 | Block params parser | `parseBlock()` in `main.ts` | `js-yaml` | **Resolved** — uses `js-yaml` (custom-parser swap reverted) |
 
-### The high-leverage observation: `chessops` covers #1 + #2 together
+### Decision: stay MIT — `chess.js` + `@mliebelt/pgn-parser`
 
-`chessops` (the library Lichess itself ships) is TypeScript-native and immutable,
-which matches our `BoardState` convention better than `chess.js`. One dependency
-could:
+The tempting unification was `chessops` (the library Lichess ships) — one
+TS-native dependency covering both #1 and #2 and shrinking the UCI glue. It was
+briefly chosen, then **rejected on licensing.**
 
-- replace the **rules engine** (#1) — `chessops/fen`, `chessops/san`,
-  `chessops/attacks` cover FEN, SAN, and legal move generation;
-- replace the **PGN parser** (#2) — `chessops/pgn` parses *and writes* PGN and
-  models a game as a **tree with variations**, mapping almost 1:1 onto our
-  `MoveNode` tree;
-- shrink the **UCI glue** (#4) — `positionToUci` / `uciPvToSan` in
-  `core/engine.ts` exist only because we own the rules engine; chessops does FEN
-  and SAN↔UCI natively, so those helpers mostly evaporate.
+**The licensing constraint.** The plugin is **MIT**, and esbuild *bundles* every
+`src/` import into `main.js`. `chessops` and `chessground` are **GPL-3.0**, so
+importing (bundling) them would force the entire plugin to GPL — copyleft, and
+hard to reverse. (`stockfish` is GPL too but is fine: it ships as a *separate*
+worker file, mere aggregation, not bundled.) Keeping the plugin permissive wins.
 
-That retires ~1,200+ LOC of our most dangerous code behind one well-maintained
-dependency. `chess.js` is the conservative alternative — even more mileage, but
-mutable and weaker on variation trees.
+So the permissive picks:
+
+- **#1 rules engine → `chess.js`** (BSD-2). The de-facto standard, most
+  battle-tested. Mutable, but wrapped behind our immutable `BoardState` adapter.
+- **#2 PGN → `@mliebelt/pgn-parser`** (Apache-2.0). A dedicated PGN text parser
+  with full variation/NAG/comment support — the gap chess.js's mainline-only PGN
+  loader can't fill. Map its AST to our `MoveNode` tree; replay through chess.js
+  for positions.
+- **#3 board (later) → `cm-chessboard`** (MIT, SVG). The permissive, SVG-native
+  analogue to chessground — keeps our SVG approach instead of chessground's
+  CSS/DOM rewrite, and stays MIT. Display + interaction only; legality comes from
+  chess.js. **A candidate now, not a forced keep** (GPL `chessground` rejected).
+
+All permissive, so the plugin stays MIT.
 
 ### What to keep (deliberately)
 
@@ -81,14 +89,12 @@ mutable and weaker on variation trees.
   UCI library. The engine itself is *already* a dependency (the `stockfish`
   package); the remaining glue is small and specific to Obsidian's browser+WASM
   context, where the Node-oriented UCI libraries don't fit.
-- **#3 chessground** — the only swap that fights our SVG architecture. Highest
-  effort; do it last, or not at all, unless interaction maintenance (Phase 5
-  drag-to-move, premoves) proves too costly.
 
 ### Recommended sequence
 
-**#2 PGN → #1 rules (same `chessops` dependency) → reassess #3.** Each step is
-independently shippable and verified against the existing test suites.
+**#2 PGN (`@mliebelt/pgn-parser`) → #1 rules (`chess.js`) → #3 board
+(`cm-chessboard`).** Each step is independently shippable and verified against the
+existing test suites. #4 (UCI glue) stays homemade throughout.
 
 ---
 
@@ -115,9 +121,10 @@ The smallest, highest-value first step. Goal: replace the *parse* path in
 `core/pgn.ts` with a battle-tested library while keeping the rest of the system
 unchanged.
 
-**Library choice.** `@mliebelt/pgn-parser` for a low-risk, PGN-only swap (keeps
-the rules engine intact), or `chessops/pgn` if we commit to the chessops path for
-#1 in the same pass. Default to the lower-risk option unless #1 is in scope now.
+**Library:** `@mliebelt/pgn-parser` (Apache-2.0). PGN-only, low-risk — keeps the
+homemade rules engine in place to replay moves into positions, so this step
+changes only the text-parse path. (The rules engine is swapped to `chess.js`
+later, as a separate step.)
 
 **Keep the public API stable.** `parsePGN`, `parseMultiPGN`, and
 `serializeMoveTree` keep their current signatures and return our existing
@@ -132,9 +139,8 @@ so `core/tree.ts`, `render/`, `view/`, and `plugin/` never change.
    annotation stripping, `--`/`Z0` null moves, multi-game splitting
    (`parseMultiPGN`), and result tokens.
 3. **Serialization stays ours for now.** `serializeMoveTree` walks our `MoveNode`
-   tree to PGN for write-back; it is small and tree-specific. Keep it (adopt
-   `chessops/pgn`'s writer later if we go that route) — the parse side is where
-   the library wins.
+   tree to PGN for write-back; it is small and tree-specific. Keep it — the
+   parse side is where the library wins.
 4. Use the existing **`tests/core/pgn.test.ts` (64 cases) as the oracle** — it
    must stay green with **no test edits**. Then add cases from real-world exports
    (Lichess, Chess.com studies, ChessBase) the homemade parser was never tested
@@ -146,3 +152,36 @@ write-back) correctly.
 
 **Likeliest gaps:** null moves and `[%clk]` stripping — the library's AST may
 expose these differently; cover them explicitly in the adapter.
+
+---
+
+## Later migration (sketch): board → `cm-chessboard` (#3)
+
+After #1 (`chess.js`) and #2 (`@mliebelt/pgn-parser`) land. Replaces our hand-rolled
+board UI — `render/board.ts`, `view/interactive-board.ts`, `view/animation.ts`
+(~756 LOC) — with `cm-chessboard` (MIT, SVG, zero deps).
+
+**Why it's now viable:** it's SVG (no architectural about-face like chessground's
+CSS/DOM) and MIT (no relicense). The earlier "keep homemade" call assumed the only
+option was GPL chessground; cm-chessboard removes both objections.
+
+**Scope / shape:**
+
+1. `view/` reorganizes around cm-chessboard's API: its move-input handler drives
+   move attempts; we answer with legal targets from `chess.js` (#1) and apply the
+   result. The `PgnViewer` single-owner/`onChange` model stays — cm-chessboard
+   becomes the board's single writer (Invariant A still holds).
+2. Pull in its extensions as needed: **Markers** (selection/last-move/legal-move
+   dots), **Arrows** (engine + user arrows), **PromotionDialog**, **Accessibility**.
+   These replace our hand-rolled highlight/arrow/animation code.
+3. Bundle its SVG piece sets (replaces `src/render/pieces/`); keep `PieceSource`
+   config pointing at the bundled set so offline still works.
+4. Animation comes from cm-chessboard, so `view/animation.ts` is retired.
+
+**Watch out for:** Obsidian DOM/Electron compatibility (vanilla ES module SVG —
+expected fine); theming parity with our six `BOARD_THEMES`; and preserving the
+flicker-free hover-preview and last-move highlighting behaviors from Retrospective 1.
+
+**Done when:** the board renders/animates via cm-chessboard, interactive moves +
+write-back work, engine + user arrows show, all six themes render, and the
+view-layer tests pass. Highest effort of the three; ship #1/#2 first.
