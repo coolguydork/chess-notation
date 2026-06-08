@@ -1,5 +1,4 @@
 import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
-import { load as parseYaml } from "js-yaml";
 import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
 import { renderBoard, uciSquareToIndex } from "../render/board";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
@@ -61,38 +60,62 @@ interface ChessBlockParams {
   analysis?: boolean;
 }
 
+// Simple line-by-line parser for chess block params.
+// Handles `pgn:` followed by raw multi-line PGN without requiring YAML indentation.
+// The five known keys are fen, pgn, orientation, theme, analysis — nothing needs
+// full YAML escaping, so we don't need js-yaml here.
 function parseBlock(source: string): ChessBlockParams {
-  const raw = parseYaml(source);
-  if (raw !== null && raw !== undefined && typeof raw !== "object") {
-    throw new Error("Chess block: expected a YAML mapping");
-  }
-  const parsed = (raw ?? {}) as Record<string, unknown>;
-
+  const KNOWN_KEYS = new Set(["fen", "pgn", "orientation", "theme", "analysis"]);
   const params: ChessBlockParams = {};
+  const lines = source.split("\n");
 
-  if ("fen" in parsed) {
-    if (typeof parsed.fen !== "string") throw new Error("Chess block: 'fen' must be a string");
-    params.fen = parsed.fen;
-  }
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const m = line.match(/^(fen|pgn|orientation|theme|analysis)\s*:(.*)/);
+    if (!m) { i++; continue; }
 
-  if ("pgn" in parsed) {
-    if (typeof parsed.pgn !== "string") throw new Error("Chess block: 'pgn' must be a string");
-    params.pgn = parsed.pgn;
-  }
+    const key = m[1];
+    const rest = m[2].trim();
 
-  if ("orientation" in parsed) {
-    if (parsed.orientation !== "white" && parsed.orientation !== "black") {
-      throw new Error("Chess block: 'orientation' must be 'white' or 'black'");
+    if (key === "pgn") {
+      const pgnLines: string[] = [];
+      // `pgn: |` or `pgn: >` — block scalar indicator only, content on next lines
+      if (rest !== "" && rest !== "|" && rest !== ">") pgnLines.push(rest);
+      i++;
+      while (i < lines.length) {
+        const km = lines[i].match(/^(fen|pgn|orientation|theme|analysis)\s*:/);
+        if (km && KNOWN_KEYS.has(km[1])) break;
+        // Strip exactly one level of leading whitespace (tabs or spaces used for indentation)
+        pgnLines.push(lines[i].replace(/^[ \t]/, ""));
+        i++;
+      }
+      params.pgn = pgnLines.join("\n").trim();
+      continue;
     }
-    params.orientation = parsed.orientation;
+
+    switch (key) {
+      case "fen":
+        if (!rest) throw new Error("Chess block: 'fen' must be a string");
+        params.fen = rest;
+        break;
+      case "orientation":
+        if (rest !== "white" && rest !== "black")
+          throw new Error("Chess block: 'orientation' must be 'white' or 'black'");
+        params.orientation = rest as "white" | "black";
+        break;
+      case "theme":
+        if (!rest) throw new Error("Chess block: 'theme' must be a string");
+        params.theme = rest;
+        break;
+      case "analysis":
+        params.analysis = rest !== "false";
+        break;
+    }
+    i++;
   }
 
-  if ("theme" in parsed) {
-    if (typeof parsed.theme !== "string") throw new Error("Chess block: 'theme' must be a string");
-    params.theme = parsed.theme;
-  }
-
-  params.analysis = "analysis" in parsed ? Boolean(parsed.analysis) : true;
+  params.analysis ??= true;
 
   if (!params.fen && !params.pgn) {
     params.fen = STARTING_FEN;
