@@ -30,6 +30,9 @@ function toIndex(square: string): number {
 // Engine-arrow ranks -> cm-chessboard's typed arrow classes (colour by rank).
 const ENGINE_ARROWS = [ARROW_TYPE.default, ARROW_TYPE.info, ARROW_TYPE.warning, ARROW_TYPE.secondary];
 const USER_ARROW = ARROW_TYPE.danger;
+// Last move: a full-square tint (colored yellow in cm-theme.css) on from/to,
+// matching the old board's highlight rather than cm-chessboard's black frame.
+const LAST_MOVE_MARKER = MARKER_TYPE.square;
 
 export function mountCmBoard(
   wrapper: HTMLElement,
@@ -71,10 +74,10 @@ export function mountCmBoard(
   let previewLm: LastMove = undefined;
 
   function setMarkers(lm: LastMove): void {
-    board.removeMarkers(MARKER_TYPE.frame);
+    board.removeMarkers(LAST_MOVE_MARKER);
     if (lm) {
-      board.addMarker(MARKER_TYPE.frame, toSquare(lm.from));
-      board.addMarker(MARKER_TYPE.frame, toSquare(lm.to));
+      board.addMarker(LAST_MOVE_MARKER, toSquare(lm.from));
+      board.addMarker(LAST_MOVE_MARKER, toSquare(lm.to));
     }
   }
 

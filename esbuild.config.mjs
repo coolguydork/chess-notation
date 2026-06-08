@@ -21,19 +21,18 @@ for (const f of ["pieces/standard.svg", "pieces/staunty.svg", "extensions/marker
   copyFileSync(`${CB}/${f}`, `dist/cm-chessboard/${f}`);
 }
 
-// styles.css = our styles + cm-chessboard CSS. Board square colors are themed
-// per instance via the --cb-light / --cb-dark custom properties (set in view/).
+// styles.css = our styles + cm-chessboard CSS + our per-instance theme overrides
+// (cm-theme.css, concatenated last so it wins). Square, coordinate, last-move
+// and arrow colors are themed per instance via the --cb-light / --cb-dark custom
+// properties (set in view/cm-board.ts).
 const css = [
   "src/plugin/styles.css",
   "node_modules/cm-chessboard/assets/chessboard.css",
   "node_modules/cm-chessboard/assets/extensions/markers/markers.css",
   "node_modules/cm-chessboard/assets/extensions/arrows/arrows.css",
   "node_modules/cm-chessboard/assets/extensions/promotion-dialog/promotion-dialog.css",
+  "src/plugin/cm-theme.css",
 ].map((f) => readFileSync(f, "utf8"));
-css.push(
-  ".cm-chessboard .board .square.white { fill: var(--cb-light, #ecdab9); }",
-  ".cm-chessboard .board .square.black { fill: var(--cb-dark, #c5a076); }",
-);
 writeFileSync("dist/styles.css", css.join("\n"));
 
 const ctx = await esbuild.context({
