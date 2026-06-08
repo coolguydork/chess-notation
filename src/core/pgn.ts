@@ -62,7 +62,7 @@ function nextNull(c: NullCursor): string {
   return c.i < c.lits.length ? c.lits[c.i++] : "Z0";
 }
 
-function cleanComment(raw: string): string {
+export function cleanComment(raw: string): string {
   // commentAfter already has [%...] annotations split out by the library; strip
   // any residual ones, collapse whitespace, and trim.
   return raw.replace(/\[%[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
