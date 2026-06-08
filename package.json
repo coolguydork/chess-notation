@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@mliebelt/pgn-parser": "^1.4.19",
+    "chess.js": "^1.4.0",
     "js-yaml": "^4.2.0",
     "stockfish": "^18.0.7"
   }

@@ -14,7 +14,7 @@ const ctx = await esbuild.context({
   bundle: true,
   external: ["obsidian"],   // Obsidian is provided at runtime; never bundle it
   format: "cjs",
-  target: "es2018",
+  target: "es2020",   // chess.js uses BigInt literals (Zobrist hashing); es2020+
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
