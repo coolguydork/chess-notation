@@ -55,6 +55,82 @@ export function gameToPgn(editor: GameEditor, result: string): string {
   return serializeMoveTree(projectGame(editor), result);
 }
 
+// ---------------------------------------------------------------------------
+// Editing — all mutations go through cm-chess. A position is addressed by its
+// SAN path from the start (the same paths the viewer already uses via
+// nodeToPath/pathToNode), so callers never hold cm-chess move references.
+// ---------------------------------------------------------------------------
+
+// The moves that may follow `prev` (null = the start position): the mainline
+// continuation plus the head of each variation that branches from prev.
+function childMovesOf(editor: GameEditor, prev: CmMove | null): CmMove[] {
+  const history = editor.chess.history();
+  const main: CmMove | undefined = prev ? prev.next : history[0];
+  if (!main) return [];
+  return [main, ...main.variations.map((v) => v[0])];
+}
+
+// Resolve a SAN path to the cm-chess move at its end (null = the root). Paths
+// originate from existing projected nodes, so they always resolve.
+function resolveMove(editor: GameEditor, path: string[]): CmMove | null {
+  let prev: CmMove | null = null;
+  for (const san of path) {
+    const found: CmMove | undefined = childMovesOf(editor, prev).find((c) => c.san === san);
+    if (!found) return prev;
+    prev = found;
+  }
+  return prev;
+}
+
+// Add `san` as a continuation of the position at `path`. Extends the mainline,
+// or branches a new variation if that position already continues. De-dupes: if
+// the move already exists there, it is a no-op (the caller just navigates to it).
+export function addMoveAt(editor: GameEditor, path: string[], san: string): void {
+  const prev = resolveMove(editor, path);
+  if (childMovesOf(editor, prev).some((c) => c.san === san)) return;
+
+  if (prev) {
+    editor.chess.move(san, prev);
+    return;
+  }
+
+  // prev === null → adding at the root (start position).
+  const mainline = editor.chess.history();
+  if (mainline.length === 0) {
+    editor.chess.move(san); // first move of the game
+    return;
+  }
+  // Root + non-empty mainline → branch a variation of the first move. cm-pgn
+  // 4.0.6 lacks addMoveAtStart, so build the move on a scratch instance at the
+  // start position and graft it as a variation of mainline[0].
+  const scratch = new Chess({ fen: editor.startFen });
+  const m = scratch.move(san);
+  if (!m) return;
+  m.previous = null;
+  m.variation = [m];
+  mainline[0].variations.push(m.variation);
+}
+
+// Remove the move at `path` and everything after it in its line. If the move is
+// a variation head, the whole variation is removed. (Removing the root no-ops.)
+export function removeAt(editor: GameEditor, path: string[]): void {
+  const target = resolveMove(editor, path);
+  if (!target) return;
+
+  const mainline = editor.chess.history();
+  const isVariationHead = target.variation !== mainline && target.variation[0] === target;
+
+  if (isVariationHead) {
+    // cm-chess's undo() clobbers the mainline's next-pointer when the move is a
+    // variation head (verified bug), so splice the variation out by hand.
+    const ownerMove = target.previous ? target.previous.next : mainline[0];
+    const idx = ownerMove ? ownerMove.variations.indexOf(target.variation) : -1;
+    if (ownerMove && idx !== -1) ownerMove.variations.splice(idx, 1);
+  } else {
+    editor.chess.undo(target);
+  }
+}
+
 // Convert a cm-chess move list (mainline or variation line) to our PgnMove[].
 function cmHistoryToPgnMoves(cmMoves: CmMove[]): PgnMove[] {
   return cmMoves.map((m) => {
