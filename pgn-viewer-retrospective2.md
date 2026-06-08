@@ -115,73 +115,131 @@ parser is already resolved (`js-yaml`).
 
 ---
 
-## First migration (sketch): PGN parser → library
+## Migration plan
 
-The smallest, highest-value first step. Goal: replace the *parse* path in
-`core/pgn.ts` with a battle-tested library while keeping the rest of the system
-unchanged.
+The executable plan to replace the hand-rolled components with the chosen
+libraries and delete the old code. Each phase is independently shippable and ends
+green; do them in order.
 
-**Library:** `@mliebelt/pgn-parser` (Apache-2.0). PGN-only, low-risk — keeps the
-homemade rules engine in place to replay moves into positions, so this step
-changes only the text-parse path. (The rules engine is swapped to `chess.js`
-later, as a separate step.)
+**Order — `#2 PGN → #1 rules → #3 board`, then cleanup. #4 (UCI glue) is kept.**
 
-**Keep the public API stable.** `parsePGN`, `parseMultiPGN`, and
-`serializeMoveTree` keep their current signatures and return our existing
-`PgnGame` / `PgnMove` / `MoveNode` types. The library lives *behind* an adapter,
-so `core/tree.ts`, `render/`, `view/`, and `plugin/` never change.
+**Why this order:** PGN (#2) is the most *isolated* change — pure text parsing
+that doesn't touch the rules backend — so it's the safe first win. Rules (#1) is
+the riskiest core swap; do it with the test harness already warmed up. Board (#3)
+is the largest UI change; do it last. PGN replays moves through whatever rules
+engine is current, so #2 keeps working after #1 with no rewrite.
 
-**Steps:**
+**Global rules (every phase):**
 
-1. Add the dependency; rewrite `core/pgn.ts` as a thin adapter: library AST →
-   our `PgnMove[]` (moves, comments, NAGs, variations).
-2. Re-map the edge cases the homemade parser handles today: `[%clk/eval/emt]`
-   annotation stripping, `--`/`Z0` null moves, multi-game splitting
-   (`parseMultiPGN`), and result tokens.
-3. **Serialization stays ours for now.** `serializeMoveTree` walks our `MoveNode`
-   tree to PGN for write-back; it is small and tree-specific. Keep it — the
-   parse side is where the library wins.
-4. Use the existing **`tests/core/pgn.test.ts` (64 cases) as the oracle** — it
-   must stay green with **no test edits**. Then add cases from real-world exports
-   (Lichess, Chess.com studies, ChessBase) the homemade parser was never tested
-   against.
-
-**Done when:** all 64 PGN tests pass against the adapter, no caller changed, and
-a multi-game, variation-heavy real-world PGN round-trips (parse → navigate →
-write-back) correctly.
-
-**Likeliest gaps:** null moves and `[%clk]` stripping — the library's AST may
-expose these differently; cover them explicitly in the adapter.
+- **Keep public signatures + our types stable.** Each replaced module keeps its
+  exported signatures and returns our own types (`BoardState`, `PgnMove`,
+  `PgnGame`, `MoveNode`, `LegalMove`). The library sits *behind* an adapter inside
+  the module; callers in `render/`/`view/`/`plugin/` don't change.
+- **Existing tests are the oracle.** The relevant suite stays green with **no test
+  edits** — the one exception is Phase 3, which replaces the SVG renderer itself.
+  A phase is done only when its suite passes *and* the dead code is deleted.
+- **Library imports respect the layers.** chess.js + @mliebelt live in `core/`;
+  cm-chessboard in `render/`+`view/`. No new library import in `plugin/`.
+- **One commit per phase**, on the `library-first` branch. Run the full suite
+  before starting each phase (baseline green).
 
 ---
 
-## Later migration (sketch): board → `cm-chessboard` (#3)
+### Phase 1 — PGN parser (#2) → `@mliebelt/pgn-parser`
 
-After #1 (`chess.js`) and #2 (`@mliebelt/pgn-parser`) land. Replaces our hand-rolled
-board UI — `render/board.ts`, `view/interactive-board.ts`, `view/animation.ts`
-(~756 LOC) — with `cm-chessboard` (MIT, SVG, zero deps).
+**Goal:** replace the PGN *text* parser; keep tree-building and serialization ours.
+**Library:** `@mliebelt/pgn-parser` (Apache-2.0).
+**Files:** `core/pgn.ts` (parse path only). No change to `core/tree.ts`, `render/`,
+`view/`, `plugin/`.
 
-**Why it's now viable:** it's SVG (no architectural about-face like chessground's
-CSS/DOM) and MIT (no relicense). The earlier "keep homemade" call assumed the only
-option was GPL chessground; cm-chessboard removes both objections.
+**Steps:**
 
-**Scope / shape:**
+1. `npm install @mliebelt/pgn-parser`.
+2. Rewrite `parsePGN` / `parseMultiPGN` to call the library and map its AST → our
+   `PgnMove[]` / `PgnGame` (same signatures, same return types).
+3. Re-map every edge case the homemade parser handled: `[%clk/eval/emt]`
+   comment-annotation stripping, `--` / `Z0` null moves, multi-game splitting,
+   NAGs, `{ }` and `;` comments, nested variations, result tokens.
+4. Leave `serializeMoveTree` (our `MoveNode` → PGN) untouched — parse side only.
+5. Delete the hand-rolled tokenizer / parse internals from `core/pgn.ts`.
 
-1. `view/` reorganizes around cm-chessboard's API: its move-input handler drives
-   move attempts; we answer with legal targets from `chess.js` (#1) and apply the
-   result. The `PgnViewer` single-owner/`onChange` model stays — cm-chessboard
-   becomes the board's single writer (Invariant A still holds).
-2. Pull in its extensions as needed: **Markers** (selection/last-move/legal-move
-   dots), **Arrows** (engine + user arrows), **PromotionDialog**, **Accessibility**.
-   These replace our hand-rolled highlight/arrow/animation code.
-3. Bundle its SVG piece sets (replaces `src/render/pieces/`); keep `PieceSource`
-   config pointing at the bundled set so offline still works.
-4. Animation comes from cm-chessboard, so `view/animation.ts` is retired.
+**Acceptance:** `tests/core/pgn.test.ts` (64) green, no edits; add real-world
+exports (Lichess / Chess.com studies / ChessBase) and they pass; `npm run build`
+green.
+**Removes:** the hand-rolled PGN parser (parse half of `core/pgn.ts`).
 
-**Watch out for:** Obsidian DOM/Electron compatibility (vanilla ES module SVG —
-expected fine); theming parity with our six `BOARD_THEMES`; and preserving the
-flicker-free hover-preview and last-move highlighting behaviors from Retrospective 1.
+---
 
-**Done when:** the board renders/animates via cm-chessboard, interactive moves +
-write-back work, engine + user arrows show, all six themes render, and the
-view-layer tests pass. Highest effort of the three; ship #1/#2 first.
+### Phase 2 — Rules engine (#1) → `chess.js`
+
+**Goal:** replace FEN, legal-move generation, and move application with chess.js,
+behind our signatures and immutable `BoardState`.
+**Library:** `chess.js` (BSD-2).
+**Files:** `core/fen.ts`, `core/legal.ts`, `core/moves.ts`; new
+`core/chessjs-bridge.ts`; opportunistic simplification of `core/engine.ts`.
+
+**Steps:**
+
+1. `npm install chess.js`.
+2. `chessjs-bridge.ts`: convert our `BoardState` ↔ chess.js (`Chess` / FEN), and
+   our numeric square index `(7-rank)*8+file` ↔ chess.js algebraic `'e4'` — the
+   board-index mapping is the integration crux.
+3. `parseFEN` / `serializeFEN` → delegate to chess.js + bridge to `BoardState`.
+4. `getLegalMoves` / `getSquareLegalMoves` / `isInCheck` → chess.js
+   `moves({ verbose })` / `isCheck()`, mapped to our `LegalMove` + indices.
+5. `applyMoveEx` / `applyMove` → chess.js `.move(san)`, returning our `BoardState`
+   + `{ from, to }`.
+6. Simplify `engine.ts` `positionToUci` / `uciPvToSan` using chess.js SAN↔UCI + FEN.
+7. Delete the hand-rolled `fen` / `legal` / `moves` internals.
+
+**Acceptance:** `tests/core/fen|legal|moves|engine.test.ts` **and** `pgn.test.ts`
+(PGN now replays through chess.js) all green, no edits; full suite + build green;
+vault smoke (navigate, interactive move + write-back).
+**Removes:** ~890 LOC of hand-rolled rules logic.
+
+---
+
+### Phase 3 — Board (#3) → `cm-chessboard`
+
+**Goal:** replace the SVG board, interaction, and animation with cm-chessboard.
+**Library:** `cm-chessboard` (MIT, SVG).
+**Files:** retire `render/board.ts`, `view/interactive-board.ts`,
+`view/animation.ts`; rework `view/pgn-viewer.ts`; update `esbuild.config.mjs`
+(bundle assets).
+**Tests:** the one phase that *replaces* tests — `tests/render/board.test.ts` (and
+parts of `config.test.ts`) assert our SVG output, which is going away; replace them
+with cm-chessboard integration checks. `tests/view/pgn-viewer.test.ts` (transition
+logic, board stubbed) stays green.
+
+**Steps:**
+
+1. `npm install cm-chessboard`; bundle its SVG piece sprites into `dist/`
+   (replaces `src/render/pieces/`); keep a bundled default so offline still works.
+2. Mount cm-chessboard inside `PgnViewer` as the board's **single writer**
+   (Invariant A preserved). Its move-input handler → validate via chess.js legal
+   dests (#1) → `commitMove`.
+3. Add extensions: **Markers** (selection / last-move / legal dots), **Arrows**
+   (engine + user arrows), **PromotionDialog**, **Accessibility** — replacing the
+   hand-rolled highlight / arrow / promotion / animation code.
+4. Map our six `BOARD_THEMES` to cm-chessboard's CSS variables for parity.
+5. Delete `render/board.ts`, `view/interactive-board.ts`, `view/animation.ts`,
+   and dead config.
+
+**Acceptance:** `tests/view/pgn-viewer.test.ts` green; new board tests pass;
+manual smoke — render, interactive move + write-back, flicker-free hover preview,
+last-move highlight, engine + user arrows, all six themes, flip board; build green.
+**Removes:** ~756 LOC of hand-rolled board / interaction / animation.
+
+---
+
+### Phase 4 — Cleanup & docs
+
+1. Remove orphan exports / dead types; `npm run build && npm test` green.
+2. Update `CLAUDE.md` — note which `core/` modules are now thin adapters, and the
+   piece-asset source if pieces now ship with cm-chessboard. Mark this plan done.
+3. Build + deploy to the test vault; final smoke.
+
+**End state:** `core/` is thin adapters over `chess.js` (#1) + `@mliebelt/pgn-parser`
+(#2); the board is `cm-chessboard` (#3); only the UCI glue (#4) and
+`serializeMoveTree` remain hand-rolled by design — replacing ~1,900 LOC of
+hand-rolled chess/board code with library-backed adapters.
