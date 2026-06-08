@@ -1,7 +1,5 @@
 import { buildMoveTree, findNodeById, attachMove, promoteVariation } from "../core/tree";
-import { renderBoard } from "./board";
 import type { MoveNode } from "../core/types";
-import type { BoardConfig } from "./config";
 
 export { buildMoveTree, findNodeById, attachMove, promoteVariation };
 
@@ -35,39 +33,6 @@ function nagSymbol(n: number): string {
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// ---------------------------------------------------------------------------
-// renderControls
-// Returns a self-contained HTML string: board SVG + navigation buttons +
-// move list (main line + all variation branches).
-//
-// data-action="prev" / data-action="next"  — nav buttons
-// data-node-id="N"                         — each move token
-// data-active="true"                       — the currently displayed move
-// ---------------------------------------------------------------------------
-
-export function renderControls(
-  root: MoveNode,
-  current: MoveNode,
-  config: BoardConfig,
-  result?: string,
-  engineArrows?: import("./config").EngineArrow[]
-): string {
-  const lastMove = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
-  const boardSvg = renderBoard(current.state, { ...config, lastMove, ...(engineArrows ? { engineArrows } : {}) });
-
-  const prevDisabled = !current.parent ? " disabled" : "";
-  const nextDisabled = !current.next   ? " disabled" : "";
-
-  const nav = `<div class="chess-nav">
-  <button data-action="prev"${prevDisabled}>&#8592;</button>
-  <button data-action="next"${nextDisabled}>&#8594;</button>
-</div>`;
-
-  const moveList = buildMoveListHtml(root, current.id, result);
-
-  return `<div class="chess-viewer">${boardSvg}${nav}${moveList}</div>`;
 }
 
 // ---------------------------------------------------------------------------

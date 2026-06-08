@@ -1,7 +1,7 @@
 import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
-import { renderBoard, uciSquareToIndex } from "../render/board";
+import { uciSquareToIndex } from "../core/fen";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
 import { PgnViewer } from "../view/pgn-viewer";
 import {
@@ -274,9 +274,7 @@ function uciToArrow(uciMove: string, color: string): EngineArrow {
 
 function mountAnalysisPanel(
   container: HTMLElement,
-  boardWrapper: HTMLElement | null,
   getState: () => BoardState,
-  baseConfig: BoardConfig,
   getWorker: () => EngineWorker,
   onArrows?: (arrows: EngineArrow[]) => void,
   onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void,
@@ -307,9 +305,6 @@ function mountAnalysisPanel(
         uciToArrow(m.uci, ARROW_COLORS[i] ?? ARROW_COLORS[ARROW_COLORS.length - 1])
       );
 
-      if (boardWrapper) {
-        boardWrapper.innerHTML = renderBoard(state, { ...baseConfig, engineArrows: arrows });
-      }
       onArrows?.(arrows);
 
       // Eval bar
@@ -629,6 +624,7 @@ export default class ChessPlugin extends Plugin {
             orientation: params.orientation ?? DEFAULT_BOARD_CONFIG.orientation,
             resolvePieceUrl: (piece) =>
               resolvePieceUrl(piece, pieceSource, getResourcePath, pluginDir),
+            resolveAssetUrl: (rel) => getResourcePath(`${pluginDir}/cm-chessboard/${rel}`),
           };
 
           if (params.fen && !params.pgn) {
@@ -669,9 +665,7 @@ export default class ChessPlugin extends Plugin {
             if (params.analysis) {
               const { reset } = mountAnalysisPanel(
                 outerContainer,
-                null,
                 () => viewer.getCurrentState(),
-                baseConfig,
                 this.getEngineWorker.bind(this),
                 (arrows) => { viewer.setEngineArrows(arrows); },
                 (pvMoves, upToIndex) => {
@@ -755,9 +749,7 @@ export default class ChessPlugin extends Plugin {
           if (params.analysis) {
             const { reset } = mountAnalysisPanel(
               outerContainer,
-              null,
               () => viewer.getCurrentState(),
-              baseConfig,
               this.getEngineWorker.bind(this),
               (arrows) => { viewer.setEngineArrows(arrows); },
               (pvMoves, upToIndex) => {

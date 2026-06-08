@@ -1,263 +1,127 @@
-import type { PgnGame, PgnMove, Color, MoveNode } from "./types";
+import { parseGame, parseGames } from "@mliebelt/pgn-parser";
+import type { PgnGame, PgnMove, MoveNode } from "./types";
 
 // ---------------------------------------------------------------------------
-// Tokeniser
+// PGN parsing is delegated to @mliebelt/pgn-parser. This module is a thin
+// adapter: it maps the library's AST to our own PgnGame / PgnMove types and
+// re-applies the few behaviours our callers rely on that the library does not
+// provide directly (see notes below). serializeMoveTree (further down) is ours.
 // ---------------------------------------------------------------------------
 
-type Token =
-  | { type: "header"; key: string; value: string }
-  | { type: "moveNumber"; number: number; dots: 1 | 3 }
-  | { type: "san"; value: string }
-  | { type: "comment"; value: string }
-  | { type: "nag"; value: number }
-  | { type: "result"; value: string }
-  | { type: "lparen" }
-  | { type: "rparen" };
+// Minimal shape of the @mliebelt AST we consume. Declared locally (and cast to)
+// so we don't couple to the library's internal type names.
+interface MlMove {
+  moveNumber: number | null;
+  notation: { notation: string };
+  turn: "w" | "b";
+  nag: string[] | null;
+  commentAfter?: string;
+  variations: MlMove[][];
+}
+interface MlGame {
+  tags: Record<string, unknown>;
+  moves: MlMove[];
+}
 
-// SAN: castling, pawn moves, piece moves — with optional disambiguation,
-// capture, promotion, and check/checkmate suffixes.
-// Also matches null moves: -- (PGN standard) and Z0 (ChessBase).
-const SAN_RE =
-  /^(?:--|Z0|O-O-O|O-O|[NBRQK][a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQK])?[+#]?|[a-h](?:[1-8]|x[a-h][1-8](?:=[NBRQK])?)(?:=[NBRQK])?[+#]?)[!?]*/;
+// A tag value is usually a string, but structured tags (e.g. Date) come back as
+// { value, ... }. Reduce any tag to its string form.
+function tagToString(v: unknown): string {
+  if (v && typeof v === "object" && "value" in v) return String((v as { value: unknown }).value);
+  return String(v);
+}
 
-function tokenise(input: string): Token[] {
-  const tokens: Token[] = [];
-  // Normalise line endings
-  let src = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+// The library synthesises tags.Result from the trailing game-termination marker
+// (e.g. "*") even when no [Result ...] header is present. Our callers expect
+// `headers` to reflect only real header tags, so only surface Result when the
+// source actually contains a [Result "..."] tag.
+function buildHeaders(tags: Record<string, unknown>, source: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const hasResultTag = /\[\s*Result\s+"/.test(source);
+  for (const [k, v] of Object.entries(tags)) {
+    if (k === "messages") continue; // library bookkeeping, not a header
+    if (k === "Result" && !hasResultTag) continue;
+    headers[k] = tagToString(v);
+  }
+  return headers;
+}
 
-  let i = 0;
+// The library normalises both "--" (PGN standard) and "Z0" (ChessBase) null
+// moves to "Z0", losing the original token. To preserve round-trip fidelity we
+// scan the source for null-move literals in order and hand them back as we
+// encounter null nodes during conversion (which proceeds in source order).
+function collectNullLiterals(source: string): string[] {
+  const cleaned = source
+    .replace(/\{[^}]*\}/g, " ") // brace comments
+    .replace(/;[^\n]*/g, " ")   // line comments
+    .replace(/\[[^\]]*\]/g, " "); // header tags / [%...] annotations
+  return cleaned.match(/(?<![\w-])(?:--|Z0)(?![\w-])/g) ?? [];
+}
 
-  while (i < src.length) {
-    // Skip whitespace
-    if (/\s/.test(src[i])) { i++; continue; }
+interface NullCursor { lits: string[]; i: number; }
+function nextNull(c: NullCursor): string {
+  return c.i < c.lits.length ? c.lits[c.i++] : "Z0";
+}
 
-    // Header tag
-    if (src[i] === "[") {
-      const end = src.indexOf("]", i);
-      if (end === -1) throw new Error("PGN: unclosed header tag");
-      const inner = src.slice(i + 1, end);
-      const match = inner.match(/^(\w+)\s+"((?:[^"\\]|\\.)*)"\s*$/);
-      if (!match) throw new Error(`PGN: malformed header tag: [${inner}]`);
-      tokens.push({ type: "header", key: match[1], value: match[2] });
-      i = end + 1;
-      continue;
+function cleanComment(raw: string): string {
+  // commentAfter already has [%...] annotations split out by the library; strip
+  // any residual ones, collapse whitespace, and trim.
+  return raw.replace(/\[%[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function convertMoves(mlMoves: MlMove[], nulls: NullCursor): PgnMove[] {
+  const out: PgnMove[] = [];
+  // The library only sets moveNumber on white (and the first) moves; carry it.
+  let num = mlMoves.length && mlMoves[0].moveNumber != null ? mlMoves[0].moveNumber : 1;
+
+  for (const m of mlMoves) {
+    if (m.moveNumber != null) num = m.moveNumber;
+
+    const isNull = m.notation.notation === "Z0";
+    const move: PgnMove = {
+      san: isNull ? nextNull(nulls) : m.notation.notation,
+      moveNumber: num,
+      color: m.turn,
+    };
+
+    if (m.nag && m.nag.length) {
+      const nags = m.nag
+        .map((s) => parseInt(s.replace(/^\$/, ""), 10))
+        .filter((n) => !Number.isNaN(n));
+      if (nags.length) move.nags = nags;
     }
 
-    // Comment
-    if (src[i] === "{") {
-      const end = src.indexOf("}", i);
-      if (end === -1) throw new Error("PGN: unclosed comment");
-      const raw = src.slice(i + 1, end);
-      // Strip embedded clock/eval/time annotations ("[%clk ...]", "[%eval ...]", etc.)
-      // then normalise whitespace and trim.
-      const stripped = raw.replace(/\[%[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
-      if (stripped) tokens.push({ type: "comment", value: stripped });
-      i = end + 1;
-      continue;
+    if (m.commentAfter) {
+      const c = cleanComment(m.commentAfter);
+      if (c) move.comment = c;
     }
 
-    // Parentheses (variations)
-    if (src[i] === "(") { tokens.push({ type: "lparen" }); i++; continue; }
-    if (src[i] === ")") { tokens.push({ type: "rparen" }); i++; continue; }
-
-    // Semicolon comment (rest of line)
-    if (src[i] === ";") {
-      const end = src.indexOf("\n", i);
-      i = end === -1 ? src.length : end + 1;
-      continue;
+    if (m.variations && m.variations.length) {
+      move.variations = m.variations.map((v) => convertMoves(v, nulls));
     }
 
-    // NAG: $N or glyph shorthand (!, ?, !!, ??, !?, ?!)
-    if (src[i] === "$") {
-      const m = src.slice(i).match(/^\$(\d+)/);
-      if (!m) throw new Error("PGN: invalid NAG");
-      tokens.push({ type: "nag", value: parseInt(m[1], 10) });
-      i += m[0].length;
-      continue;
-    }
-
-    // Move number: digits followed by one or three dots
-    const moveNumMatch = src.slice(i).match(/^(\d+)(\.{1,3})/);
-    if (moveNumMatch) {
-      tokens.push({
-        type: "moveNumber",
-        number: parseInt(moveNumMatch[1], 10),
-        dots: moveNumMatch[2].length === 3 ? 3 : 1,
-      });
-      i += moveNumMatch[0].length;
-      continue;
-    }
-
-    // Result
-    const resultMatch = src.slice(i).match(/^(1-0|0-1|1\/2-1\/2|\*)/);
-    if (resultMatch) {
-      tokens.push({ type: "result", value: resultMatch[1] });
-      i += resultMatch[0].length;
-      continue;
-    }
-
-    // SAN move (including any trailing !? suffix consumed here)
-    const sanMatch = src.slice(i).match(SAN_RE);
-    if (sanMatch) {
-      // Strip trailing glyph shortcuts — they'll be re-emitted as NAG tokens
-      // but we need to consume them so the cursor advances.
-      // Actually: SAN_RE already includes trailing [!?]* — we keep them in the
-      // san token and convert below.  Strip glyph chars from the SAN value and
-      // emit separate NAG tokens.
-      const full = sanMatch[0];
-      const glyphMatch = full.match(/([!?]+)$/);
-      const san = glyphMatch ? full.slice(0, full.length - glyphMatch[1].length) : full;
-      tokens.push({ type: "san", value: san });
-      if (glyphMatch) {
-        for (const nag of glyphsToNags(glyphMatch[1])) {
-          tokens.push({ type: "nag", value: nag });
-        }
-      }
-      i += full.length;
-      continue;
-    }
-
-    throw new Error(`PGN: unexpected character '${src[i]}' at position ${i}`);
+    out.push(move);
+    if (m.turn === "b") num++;
   }
 
-  return tokens;
-}
-
-function glyphsToNags(glyphs: string): number[] {
-  switch (glyphs) {
-    case "!":  return [1];
-    case "?":  return [2];
-    case "!!": return [3];
-    case "??": return [4];
-    case "!?": return [5];
-    case "?!": return [6];
-    default:   return [];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
-
-interface ParserState {
-  tokens: Token[];
-  pos: number;
-}
-
-function peek(ps: ParserState): Token | undefined {
-  return ps.tokens[ps.pos];
-}
-
-function consume(ps: ParserState): Token {
-  const t = ps.tokens[ps.pos];
-  if (!t) throw new Error("PGN: unexpected end of input");
-  ps.pos++;
-  return t;
-}
-
-function parseMoveList(ps: ParserState, startColor: Color, startMoveNumber: number): PgnMove[] {
-  const moves: PgnMove[] = [];
-  let currentColor: Color = startColor;
-  let currentMoveNumber: number = startMoveNumber;
-
-  while (ps.pos < ps.tokens.length) {
-    const t = peek(ps);
-    if (!t) break;
-
-    if (t.type === "result" || t.type === "rparen") break;
-
-    if (t.type === "moveNumber") {
-      consume(ps);
-      // Update tracking from the explicit move number token
-      currentMoveNumber = t.number;
-      currentColor = t.dots === 3 ? "b" : "w";
-      continue;
-    }
-
-    if (t.type === "san") {
-      consume(ps);
-      const move: PgnMove = {
-        san: t.value,
-        moveNumber: currentMoveNumber,
-        color: currentColor,
-      };
-
-      // Collect NAGs and comment immediately following this SAN
-      while (ps.pos < ps.tokens.length) {
-        const next = peek(ps);
-        if (next?.type === "nag") {
-          consume(ps);
-          move.nags = move.nags ?? [];
-          move.nags.push(next.value);
-        } else if (next?.type === "comment") {
-          consume(ps);
-          move.comment = next.value;
-        } else {
-          break;
-        }
-      }
-
-      // Collect variations (one or more) following this move
-      while (peek(ps)?.type === "lparen") {
-        consume(ps); // consume "("
-        // A variation starts from the same move number / color perspective as
-        // what the variation "replaces" — but we need to figure that out from
-        // the first moveNumber token inside (if present).
-        const varMoves = parseMoveList(ps, currentColor, currentMoveNumber);
-        const rparen = consume(ps);
-        if (rparen.type !== "rparen") throw new Error("PGN: expected ')'");
-        move.variations = move.variations ?? [];
-        move.variations.push(varMoves);
-      }
-
-      moves.push(move);
-
-      // Advance color for next move
-      if (currentColor === "w") {
-        currentColor = "b";
-      } else {
-        currentColor = "w";
-        currentMoveNumber++;
-      }
-      continue;
-    }
-
-    // Skip stray NAGs or comments not attached to a move (e.g. pre-game comments)
-    if (t.type === "nag" || t.type === "comment") {
-      consume(ps);
-      continue;
-    }
-
-    break;
-  }
-
-  return moves;
+  return out;
 }
 
 export function parsePGN(input: string): PgnGame {
   if (!input.trim()) throw new Error("PGN: input is empty");
 
-  const tokens = tokenise(input);
-  const ps: ParserState = { tokens, pos: 0 };
+  const game = parseGame(input) as unknown as MlGame;
 
-  // Headers
-  const headers: Record<string, string> = {};
-  while (peek(ps)?.type === "header") {
-    const t = consume(ps) as Extract<Token, { type: "header" }>;
-    headers[t.key] = t.value;
-  }
-
-  // Move list
-  const moves = parseMoveList(ps, "w", 1);
-
-  // Result
-  const resultToken = peek(ps);
-  if (!resultToken || resultToken.type !== "result") {
+  const result = game.tags.Result;
+  if (typeof result !== "string") {
     throw new Error("PGN: missing result token (expected 1-0, 0-1, 1/2-1/2, or *)");
   }
-  consume(ps);
 
-  return { headers, moves, result: resultToken.value };
+  const nulls: NullCursor = { lits: collectNullLiterals(input), i: 0 };
+  return {
+    headers: buildHeaders(game.tags, input),
+    moves: convertMoves(game.moves, nulls),
+    result,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,37 +132,26 @@ export function parsePGN(input: string): PgnGame {
 export function parseMultiPGN(input: string): PgnGame[] {
   if (!input.trim()) throw new Error("PGN: input is empty");
 
-  const tokens = tokenise(input);
-  const ps: ParserState = { tokens, pos: 0 };
-  const games: PgnGame[] = [];
+  const games = parseGames(input) as unknown as MlGame[];
+  if (!games || games.length === 0) throw new Error("PGN: no games found");
 
-  while (ps.pos < ps.tokens.length) {
-    // Headers
-    const headers: Record<string, string> = {};
-    while (peek(ps)?.type === "header") {
-      const t = consume(ps) as Extract<Token, { type: "header" }>;
-      headers[t.key] = t.value;
-    }
+  // One cursor shared across all games: null-move literals are consumed in
+  // overall source order, and games are returned in source order.
+  const nulls: NullCursor = { lits: collectNullLiterals(input), i: 0 };
 
-    if (ps.pos >= ps.tokens.length) break;
-
-    // Move list
-    const moves = parseMoveList(ps, "w", 1);
-
-    // Result
-    const resultToken = peek(ps);
-    if (!resultToken || resultToken.type !== "result") {
+  return games.map((game, idx) => {
+    const result = game.tags.Result;
+    if (typeof result !== "string") {
       throw new Error(
-        `PGN: game ${games.length + 1}: missing result token (expected 1-0, 0-1, 1/2-1/2, or *)`
+        `PGN: game ${idx + 1}: missing result token (expected 1-0, 0-1, 1/2-1/2, or *)`
       );
     }
-    consume(ps);
-
-    games.push({ headers, moves, result: resultToken.value });
-  }
-
-  if (games.length === 0) throw new Error("PGN: no games found");
-  return games;
+    return {
+      headers: buildHeaders(game.tags, input),
+      moves: convertMoves(game.moves, nulls),
+      result,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

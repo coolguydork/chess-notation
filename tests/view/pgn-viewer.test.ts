@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgnViewer, type ChangeEvent } from "../../src/view/pgn-viewer";
-import type { InteractiveBoardHandle } from "../../src/view/interactive-board";
+import type { InteractiveBoardHandle } from "../../src/view/board-handle";
 import { buildMoveTree, attachMove } from "../../src/core/tree";
 import { parseFEN } from "../../src/core/fen";
 import { applyMoveEx } from "../../src/core/moves";

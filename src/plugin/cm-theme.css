@@ -1,0 +1,27 @@
+/* Per-instance theming for our cm-chessboard board (cssClass "chess-notation").
+   The six BOARD_THEMES render without a cm-chessboard theme class: square,
+   coordinate, last-move and arrow colours all derive from the --cb-light /
+   --cb-dark custom properties set per board in view/cm-board.ts. Concatenated
+   AFTER cm-chessboard's own CSS so these overrides win at equal specificity. */
+
+/* Square colours straight from the theme. */
+.cm-chessboard.chess-notation .board .square.white { fill: var(--cb-light, #ecdab9); }
+.cm-chessboard.chess-notation .board .square.black { fill: var(--cb-dark, #c5a076); }
+
+/* Coordinates sit inside a corner of each square; use the opposite square
+   colour for contrast (light squares get the dark colour, and vice versa) —
+   matching the old SVG board. Scoped to our class because cm-chessboard only
+   ships coordinate colours for its own named themes. */
+.cm-chessboard.chess-notation .coordinates .coordinate.white { fill: var(--cb-dark, #c5a076); }
+.cm-chessboard.chess-notation .coordinates .coordinate.black { fill: var(--cb-light, #ecdab9); }
+
+/* Last move: translucent yellow tint on the from/to squares (the universal
+   convention, and what the old board drew). Sits under the pieces layer. */
+.cm-chessboard.chess-notation .markers .marker.marker-square {
+  fill: #ffd54a;
+  opacity: 0.45;
+}
+
+/* Arrows: a touch more opaque than cm-chessboard's faint defaults so engine
+   and user arrows read clearly on every theme. */
+.cm-chessboard.chess-notation .arrows .arrow-line { opacity: 0.75; }
