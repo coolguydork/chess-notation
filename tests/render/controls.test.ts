@@ -507,3 +507,27 @@ describe("attachMove", () => {
     expect(e5Node.moveNumber).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildMoveListHtml — delete control (editable blocks)
+// ---------------------------------------------------------------------------
+
+describe("buildMoveListHtml delete control", () => {
+  const root = buildMoveTree(STARTING_FEN, [
+    { san: "e4", moveNumber: 1, color: "w" },
+    { san: "e5", moveNumber: 1, color: "b" },
+  ]);
+  const e4 = root.next!;
+  const e5 = e4.next!;
+
+  it("emits a delete button only on the active move when editable", () => {
+    const html = buildMoveListHtml(root, e4.id, undefined, true);
+    expect(html).toContain(`data-delete-id="${e4.id}"`);
+    expect(html).not.toContain(`data-delete-id="${e5.id}"`);
+  });
+
+  it("emits no delete buttons when not editable", () => {
+    expect(buildMoveListHtml(root, e4.id, undefined, false)).not.toContain("data-delete-id");
+    expect(buildMoveListHtml(root, e4.id)).not.toContain("data-delete-id"); // default
+  });
+});

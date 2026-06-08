@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgnViewer, type ChangeEvent } from "../../src/view/pgn-viewer";
 import type { InteractiveBoardHandle } from "../../src/view/board-handle";
 import { buildMoveTree } from "../../src/core/tree";
-import { gameFromFen, projectGame } from "../../src/core/game";
+import { gameFromFen, gameFromPgn, projectGame } from "../../src/core/game";
 import type { GameEditor } from "../../src/core/game";
 import { parseFEN } from "../../src/core/fen";
 import { applyMoveEx } from "../../src/core/moves";
@@ -226,6 +226,35 @@ describe("PgnViewer (state-machine)", () => {
       const result = applyMoveEx(startState, "e4");
       viewer.commitMove("e4", result.from, result.to, result.state);
 
+      expect(events).toHaveLength(0);
+    });
+  });
+
+  describe("deleteMove", () => {
+    it("truncates from a move and relocates current to the deleted move's parent", () => {
+      const editor = gameFromPgn("1. e4 e5 2. Nf3");
+      const root = projectGame(editor);
+      const e5 = root.next!.next!;
+      const nf3 = e5.next!;
+      const { viewer } = makeViewer(root, nf3, editor); // current at Nf3
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      viewer.deleteMove(e5); // delete e5 and everything after it
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.san).toBe("e4");
+      expect(last.root.next!.next).toBeNull();
+      expect(last.current.san).toBe("e4"); // relocated to e5's parent
+    });
+
+    it("is read-only (no-op) when there is no editor", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root.next!); // no editor
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      viewer.deleteMove(root.next!);
       expect(events).toHaveLength(0);
     });
   });

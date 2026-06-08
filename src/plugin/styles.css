@@ -156,6 +156,25 @@
   margin: 0 1px;
 }
 
+.chess-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9em;
+  line-height: 1;
+  color: var(--text-faint);
+  padding: 0 2px;
+  margin-left: 2px;
+  vertical-align: middle;
+  box-shadow: none;
+}
+
+.chess-delete-btn:hover {
+  color: var(--text-error, #d33);
+}
+
 .chess-game-selector {
   width: 100%;
   margin-bottom: 4px;

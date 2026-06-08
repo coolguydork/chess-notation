@@ -39,11 +39,11 @@ function escapeHtml(text: string): string {
 // Move list rendering
 // ---------------------------------------------------------------------------
 
-export function buildMoveListHtml(root: MoveNode, currentId: number, result?: string): string {
+export function buildMoveListHtml(root: MoveNode, currentId: number, result?: string, editable = false): string {
   if (!root.next) return "";
 
   const parts: string[] = [];
-  renderLine(root.next, currentId, parts, /* firstInLine */ true);
+  renderLine(root.next, currentId, parts, /* firstInLine */ true, editable);
   if (result) parts.push(`<span class="chess-result">${result}</span>`);
 
   return `<div class="chess-move-list">${parts.join("")}</div>`;
@@ -51,7 +51,8 @@ export function buildMoveListHtml(root: MoveNode, currentId: number, result?: st
 
 // Render a sequence of linked nodes, inserting variation sub-trees inline.
 // needsMoveNumber: true at the start of any line and after a variation closes.
-function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveNumber: boolean): void {
+// editable: emit a delete control on the active move.
+function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveNumber: boolean, editable: boolean): void {
   let cur: MoveNode | null = head;
   let showNumber = needsMoveNumber;
 
@@ -71,6 +72,11 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
       out.push(`<span class="chess-nags">${glyphs}</span>`);
     }
 
+    // Delete control on the active move (editable blocks only)
+    if (editable && cur.id === currentId) {
+      out.push(`<button class="chess-delete-btn" data-delete-id="${cur.id}" title="Delete from here">×</button>`);
+    }
+
     // Annotation comment — block element so it drops below the move line
     if (cur.comment) {
       out.push(`<span class="chess-comment">${escapeHtml(cur.comment)}</span>`);
@@ -81,7 +87,7 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     for (const varHead of cur.variationHeads) {
       out.push(`<span class="chess-variation">`);
       out.push(`<span class="chess-variation-paren">(</span>`);
-      renderLine(varHead, currentId, out, /* firstInLine */ true);
+      renderLine(varHead, currentId, out, /* firstInLine */ true, editable);
       out.push(`<span class="chess-variation-paren">)</span>`);
       out.push(`</span>`);
       showNumber = true; // re-show move number after a variation closes

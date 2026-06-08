@@ -1,6 +1,6 @@
 import { buildMoveListHtml } from "../render/controls";
 import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
-import { addMoveAt, projectGame } from "../core/game";
+import { addMoveAt, removeAt, projectGame } from "../core/game";
 import type { GameEditor } from "../core/game";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
@@ -120,6 +120,12 @@ export class PgnViewer {
     // Move list: click delegation
     this.moveListEl.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
+      const deleteId = t.closest<HTMLElement>("[data-delete-id]")?.dataset.deleteId;
+      if (deleteId) {
+        const n = findNodeById(this.state.root, Number(deleteId));
+        if (n) this.deleteMove(n);
+        return;
+      }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
       if (nodeId) {
         const n = findNodeById(this.state.root, Number(nodeId));
@@ -189,7 +195,7 @@ export class PgnViewer {
     const color = this.state.current.state.activeColor;
     this.turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
-    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result);
+    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined);
     this.scrollActiveMoveIntoView();
   }
 
@@ -272,6 +278,25 @@ export class PgnViewer {
     const root = projectGame(this.editor);
     const current = pathToNode(root, [...path, san]);
     this.board.setState(newState, { from, to });
+    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.render();
+    this.emit("move");
+  }
+
+  // Delete `node` and everything after it in its line (a whole variation if
+  // `node` is a variation head). Current relocates to the deepest surviving
+  // node on its old path — the deleted move's parent if current was removed.
+  deleteMove(node: MoveNode): void {
+    if (!this.editor) return;
+    const curPath = nodeToPath(this.state.current);
+    removeAt(this.editor, nodeToPath(node));
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, curPath);
+    this.clearHover();
+    this.cancelAnim?.();
+    this.cancelAnim = null;
+    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+    this.board.setState(current.state, lm);
     this.state = { ...this.state, root, current, engineArrows: [] };
     this.render();
     this.emit("move");
