@@ -1,7 +1,7 @@
-import { buildMoveTree, findNodeById, attachMove } from "../core/tree";
+import { buildMoveTree, findNodeById } from "../core/tree";
 import type { MoveNode } from "../core/types";
 
-export { buildMoveTree, findNodeById, attachMove };
+export { buildMoveTree, findNodeById };
 
 // ---------------------------------------------------------------------------
 // NAG symbols

@@ -102,40 +102,6 @@ export function findNodeById(root: MoveNode, id: number): MoveNode | null {
 }
 
 // ---------------------------------------------------------------------------
-// attachMove
-// Given the current node and a SAN move just played by the user, either
-// returns an existing node in the tree for that move (mainline or variation)
-// or creates a new node and grafts it onto the tree.
-//
-// Attachment rules:
-//   • current.next exists and matches san → return current.next (already mainline)
-//   • current.next.variationHeads contains a match → return that variation head
-//   • current.next exists but doesn't match → add a new variationHead to current.next
-//   • current.next is null → extend the mainline with a new node
-// ---------------------------------------------------------------------------
-
-export function attachMove(current: MoveNode, san: string, newState: BoardState, from: number, to: number): MoveNode {
-  const color = current.state.activeColor;
-  const moveNumber = current.state.fullmoveNumber;
-
-  if (current.next) {
-    if (current.next.san === san) return current.next;
-    for (const v of current.next.variationHeads) {
-      if (v.san === san) return v;
-    }
-    // New variation branching from the same parent position as current.next
-    const node = makeNode(san, moveNumber, color, newState, from, to, current);
-    current.next.variationHeads.push(node);
-    return node;
-  }
-
-  // Extend the mainline
-  const node = makeNode(san, moveNumber, color, newState, from, to, current);
-  current.next = node;
-  return node;
-}
-
-// ---------------------------------------------------------------------------
 // nodeToPath / pathToNode
 // Serialise/restore the viewer's position as a sequence of SANs from root.
 // ---------------------------------------------------------------------------

@@ -26,8 +26,9 @@ tests/
 Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer) belongs in `view/`, not `plugin/`.
 
 ### `core/` — Chess logic
-- Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN — moves, comments, NAGs, variations), `moves.ts` (SAN → new `BoardState`), `legal.ts` (legal moves with check/pin filtering, castling safety, en passant), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
-- No DOM, no Obsidian, no side effects. Every public function pure and unit-testable in isolation.
+- Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN parse via `@mliebelt/pgn-parser` + `serializeMoveTree`), `moves.ts` / `legal.ts` (move application + legal moves, delegated to `chess.js` via `chessjs-bridge.ts`), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
+- `game.ts` — `GameEditor`: cm-chess owns the **editable** game (load, add/remove moves, serialize). All PGN *edits* go through it; it projects to a read-only `MoveNode` tree for rendering. Plain holder + functions, no class (core/ convention).
+- No DOM, no Obsidian, no side effects. Functions are pure except `GameEditor`'s edit ops, which mutate their cm-chess instance in place.
 
 ### `render/` — Board rendering
 - Produces SVG from a `core/` board-state value object + a config (colors, theme, orientation, highlights).
@@ -124,7 +125,8 @@ theme is a one-line entry in that record.
 | `core/` has zero Obsidian imports | Keeps chess logic testable outside Obsidian and reusable |
 | `js-yaml` for the chess block body | Human-readable, extensible without breaking old blocks; a battle-tested parser instead of a hand-rolled one (library-first) |
 | SVG rendering (not canvas) | SVG is accessible, scalable, and inspectable in devtools |
-| Rules engine currently homemade (`core/legal.ts`, `moves.ts`, `fen.ts`) | Predates library-first and is the most correctness-critical code; treat as a candidate to revisit against `chess.js`, not a permanent exception. See [retrospective 2](pgn-viewer-retrospective2.md) |
+| Rules engine via `chess.js` (`core/legal.ts`, `moves.ts` delegate through `chessjs-bridge.ts`) | Library-first; `chess.js 1.x` owns legal moves / application / check detection. `fen.ts` stays homemade (it doubles as the BoardState ↔ FEN conversion primitive). |
+| PGN **edits** via `cm-chess` (`core/game.ts`) | Editing (add/remove moves, variation branching) rides on a battle-tested library instead of homemade tree mutation. cm-chess owns the editable game; we project to `MoveNode` for rendering and serialize via `serializeMoveTree` (cm-pgn's `render()` mis-emits NAGs / SetUp-FEN numbers). cm-pgn pulls in a second engine (`chess.mjs`); accepted. Multi-game + null-move games stay read-only on the `@mliebelt` path. |
 | Four-layer architecture (`core → render → view → plugin`) | Enforces separation so phases don't require refactoring layer boundaries |
 | Piece assets default to bundled | Obsidian is local-first; offline must always work without configuration |
 | Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |

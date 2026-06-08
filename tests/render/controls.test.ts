@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove } from "../../src/render/controls";
-import { applyMove } from "../../src/core/moves";
+import { buildMoveTree, findNodeById, buildMoveListHtml } from "../../src/render/controls";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
 import type { PgnMove, MoveNode } from "../../src/core/types";
@@ -434,77 +433,6 @@ describe("buildMoveListHtml", () => {
       expect(html).toContain("Queens pawn");
       expect(html).toContain("chess-comment");
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// attachMove
-// ---------------------------------------------------------------------------
-
-describe("attachMove", () => {
-  function makeRoot(): MoveNode {
-    return buildMoveTree(STARTING_FEN, []);
-  }
-
-  it("extends the mainline when current.next is null", () => {
-    const root = makeRoot();
-    const newState = applyMove(root.state, "e4");
-    const node = attachMove(root, "e4", newState);
-    expect(node.san).toBe("e4");
-    expect(root.next).toBe(node);
-    expect(node.parent).toBe(root);
-  });
-
-  it("returns the existing mainline node when the same move is played again", () => {
-    const root = makeRoot();
-    const newState = applyMove(root.state, "e4");
-    const first = attachMove(root, "e4", newState);
-    const second = attachMove(root, "e4", newState);
-    expect(second).toBe(first);
-    expect(root.next).toBe(first);
-  });
-
-  it("adds a variation when a different move is played after mainline exists", () => {
-    const root = makeRoot();
-    const e4State = applyMove(root.state, "e4");
-    const d4State = applyMove(root.state, "d4");
-    const mainNode = attachMove(root, "e4", e4State);
-    const varNode  = attachMove(root, "d4", d4State);
-
-    expect(mainNode.san).toBe("e4");
-    expect(varNode.san).toBe("d4");
-    expect(root.next).toBe(mainNode);
-    expect(mainNode.variationHeads).toContain(varNode);
-    expect(varNode.parent).toBe(root);
-  });
-
-  it("returns an existing variation node rather than creating a duplicate", () => {
-    const root = makeRoot();
-    const e4State = applyMove(root.state, "e4");
-    const d4State = applyMove(root.state, "d4");
-    attachMove(root, "e4", e4State);
-    const varNode  = attachMove(root, "d4", d4State);
-    const varNode2 = attachMove(root, "d4", d4State);
-    expect(varNode2).toBe(varNode);
-    expect(root.next!.variationHeads.length).toBe(1);
-  });
-
-  it("attaches the correct move number and color", () => {
-    const root = makeRoot(); // white to move, fullmoveNumber=1
-    const newState = applyMove(root.state, "e4");
-    const node = attachMove(root, "e4", newState);
-    expect(node.color).toBe("w");
-    expect(node.moveNumber).toBe(1);
-  });
-
-  it("correctly numbers black's reply", () => {
-    const root = makeRoot();
-    const e4State = applyMove(root.state, "e4");
-    const e4Node = attachMove(root, "e4", e4State);
-    const e5State = applyMove(e4State, "e5");
-    const e5Node = attachMove(e4Node, "e5", e5State);
-    expect(e5Node.color).toBe("b");
-    expect(e5Node.moveNumber).toBe(1);
   });
 });
 
