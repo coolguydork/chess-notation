@@ -33,79 +33,116 @@ looked like it.
 means the library's rules leak into the user-facing format. A trivial custom
 parser owns the format completely and is easier to extend.
 
----
-
-## The three homemade components worth reconsidering
-
-### 1. PGN parser — `core/pgn.ts`
-
-**Alternative:** `@mliebelt/pgn-parser`
-
-This is the weakest justification for building from scratch. PGN has a formal
-spec and many edge cases (encodings, non-standard tags, deeply nested
-variations, NAG combinations, `{` vs. `;` comments). The homemade parser covers
-the common cases but has not been tested against the corpus of real-world PGN
-files that established parsers have absorbed.
-
-The CLAUDE.md rule ("no third-party chess libraries for core logic") was written
-to protect the **rules engine**, not to prohibit a parser. A PGN parser is a
-text format parser, not logic. This distinction is worth revisiting.
-
-**Risk of keeping homemade:** silent mis-parses on unusual but valid PGN (e.g.
-games exported from Lichess, Chess.com study exports, Chessbase files).
-
-### 2. Rules engine — `core/fen.ts` + `core/legal.ts` + `core/moves.ts`
-
-**Alternative:** `chess.js`
-
-This was a **deliberate architectural decision** documented in CLAUDE.md:
-> "Avoids opaque dependency; rules engine is small and well-scoped."
-
-`chess.js` is the most battle-tested open-source JavaScript chess rules engine.
-It has years of tournament-level testing covering pins, discovered checks,
-castling edge cases, en passant capture rights, and promotion. Our `legal.ts`
-handles all of this correctly today, but it is the most complex and bug-prone
-surface in the project.
-
-The decision to own the rules engine is defensible. But "small and well-scoped"
-should be revisited as Phase 5 (engine integration) expands the surface.
-
-**Risk of keeping homemade:** bugs in legal move generation are hard to find and
-embarrassing (illegal moves accepted, legal moves rejected). Any Phase 5 work
-that adds human-vs-engine play increases the stakes.
-
-### 3. Board rendering and interaction — `render/board.ts` + `view/`
-
-**Alternative:** `chessground` (Lichess's board component)
-
-Chessground handles SVG/DOM rendering, drag-and-drop, animation, premoves, and
-arrow drawing — essentially everything in `render/board.ts`,
-`view/interactive-board.ts`, and `view/animation.ts`.
-
-This was also a **deliberate architectural decision**: SVG rendering, chosen
-for accessibility and Obsidian's DOM environment. Chessground's architecture
-(CSS-based, imperative DOM) is fundamentally different and would require
-abandoning the layered SVG approach.
-
-The tradeoff is real: Chessground works. Our board has had multiple animation
-and flicker bugs (see Retrospective 1). But adopting Chessground would mean
-accepting its CSS/asset pipeline in an Obsidian plugin context, which is
-non-trivial.
-
-**Risk of keeping homemade:** continued maintenance burden on animation and
-interaction edge cases. Phase 5 (drag-and-drop for engine play, premoves) will
-add more.
+**Update (reversed — library-first):** this swap was undone. Replacing a
+battle-tested parser with a hand-rolled one is exactly the wheel-reinvention the
+project now avoids; `js-yaml` is kept. The multi-line PGN awkwardness is handled
+the library-consistent way — a YAML block scalar (`pgn: |` with indented
+content) — and documented in the block syntax, rather than by abandoning the
+library. See "Principle adopted" below.
 
 ---
 
-## Summary
+## Inventory: hand-rolled vs. established libraries
 
-| Component | Homemade | Established alternative | Decision |
-|---|---|---|---|
-| Block params parser | `parseBlock()` in `main.ts` | `js-yaml` (was using) | **Replaced** with custom parser; no library needed |
-| PGN parser | `core/pgn.ts` | `@mliebelt/pgn-parser` | **Reconsider** — not a rules engine |
-| Rules engine | `core/legal.ts` + `moves.ts` + `fen.ts` | `chess.js` | **Keep** — deliberate, documented decision |
-| Board + interaction | `render/board.ts` + `view/` | `chessground` | **Keep** — architectural mismatch; revisit if Phase 5 proves too expensive |
+A full sweep of the source: ~3,000 of ~4,285 LOC is hand-rolled chess logic.
+Five components were built from scratch; four have a strong library that could
+do the job (one is already resolved).
 
-The PGN parser is the most actionable item: it is a text format, not chess
-logic, and the existing CLAUDE.md rule does not clearly prohibit replacing it.
+| # | Component | Hand-rolled (files · LOC) | Library | Case |
+|---|---|---|---|---|
+| 1 | **Rules engine** — FEN, move application, legal moves | `core/fen.ts` 143 · `core/moves.ts` 334 · `core/legal.ts` 415 (+ `types.ts`) ≈ **890** | **chessops** (Lichess; TS-native, immutable) or **chess.js** | Strong — most correctness-critical and bug-prone surface |
+| 2 | **PGN parse/serialize** | `core/pgn.ts` 349 (+ tree builders `core/tree.ts` 191) | **chessops/pgn** or **@mliebelt/pgn-parser** | Strongest / most actionable — a text format, not chess logic |
+| 3 | **Board render + interaction + animation** | `render/board.ts` 274 · `view/interactive-board.ts` 422 · `view/animation.ts` 60 ≈ **756** | **chessground** (Lichess board UI) | Real but highest-effort; architectural mismatch (SVG vs. CSS/DOM) |
+| 4 | **UCI protocol glue** — parse `info`/`bestmove`/`option`, build commands, SAN↔UCI | `core/engine.ts` 228 · `plugin/engine-worker.ts` 464 ≈ **690** | (none strong) | **Keep** — see below |
+| 5 | Block params parser | `parseBlock()` in `main.ts` | `js-yaml` | **Resolved** — uses `js-yaml` (custom-parser swap reverted) |
+
+### The high-leverage observation: `chessops` covers #1 + #2 together
+
+`chessops` (the library Lichess itself ships) is TypeScript-native and immutable,
+which matches our `BoardState` convention better than `chess.js`. One dependency
+could:
+
+- replace the **rules engine** (#1) — `chessops/fen`, `chessops/san`,
+  `chessops/attacks` cover FEN, SAN, and legal move generation;
+- replace the **PGN parser** (#2) — `chessops/pgn` parses *and writes* PGN and
+  models a game as a **tree with variations**, mapping almost 1:1 onto our
+  `MoveNode` tree;
+- shrink the **UCI glue** (#4) — `positionToUci` / `uciPvToSan` in
+  `core/engine.ts` exist only because we own the rules engine; chessops does FEN
+  and SAN↔UCI natively, so those helpers mostly evaporate.
+
+That retires ~1,200+ LOC of our most dangerous code behind one well-maintained
+dependency. `chess.js` is the conservative alternative — even more mileage, but
+mutable and weaker on variation trees.
+
+### What to keep (deliberately)
+
+- **#4 UCI glue** — keep. "Library-first" must not push us toward an unmaintained
+  UCI library. The engine itself is *already* a dependency (the `stockfish`
+  package); the remaining glue is small and specific to Obsidian's browser+WASM
+  context, where the Node-oriented UCI libraries don't fit.
+- **#3 chessground** — the only swap that fights our SVG architecture. Highest
+  effort; do it last, or not at all, unless interaction maintenance (Phase 5
+  drag-to-move, premoves) proves too costly.
+
+### Recommended sequence
+
+**#2 PGN → #1 rules (same `chessops` dependency) → reassess #3.** Each step is
+independently shippable and verified against the existing test suites.
+
+---
+
+## Principle adopted: library-first
+
+Now a standing project philosophy, recorded in `CLAUDE.md` ("Coding conventions"
+and "Key decisions"):
+
+> **Use the best, most reliable, battle-tested open-source library available —
+> don't reinvent the wheel.** Build something new only when there is a real,
+> specific reason. Reinvented wheels usually come out square, and the ride has
+> been bumpy because of it.
+
+The old blanket rule ("no third-party chess libraries") was **removed** — not
+narrowed. Library-first applies everywhere, as much as possible. Per-component
+status and the migration sequence are in the Inventory above; the block-params
+parser is already resolved (`js-yaml`).
+
+---
+
+## First migration (sketch): PGN parser → library
+
+The smallest, highest-value first step. Goal: replace the *parse* path in
+`core/pgn.ts` with a battle-tested library while keeping the rest of the system
+unchanged.
+
+**Library choice.** `@mliebelt/pgn-parser` for a low-risk, PGN-only swap (keeps
+the rules engine intact), or `chessops/pgn` if we commit to the chessops path for
+#1 in the same pass. Default to the lower-risk option unless #1 is in scope now.
+
+**Keep the public API stable.** `parsePGN`, `parseMultiPGN`, and
+`serializeMoveTree` keep their current signatures and return our existing
+`PgnGame` / `PgnMove` / `MoveNode` types. The library lives *behind* an adapter,
+so `core/tree.ts`, `render/`, `view/`, and `plugin/` never change.
+
+**Steps:**
+
+1. Add the dependency; rewrite `core/pgn.ts` as a thin adapter: library AST →
+   our `PgnMove[]` (moves, comments, NAGs, variations).
+2. Re-map the edge cases the homemade parser handles today: `[%clk/eval/emt]`
+   annotation stripping, `--`/`Z0` null moves, multi-game splitting
+   (`parseMultiPGN`), and result tokens.
+3. **Serialization stays ours for now.** `serializeMoveTree` walks our `MoveNode`
+   tree to PGN for write-back; it is small and tree-specific. Keep it (adopt
+   `chessops/pgn`'s writer later if we go that route) — the parse side is where
+   the library wins.
+4. Use the existing **`tests/core/pgn.test.ts` (64 cases) as the oracle** — it
+   must stay green with **no test edits**. Then add cases from real-world exports
+   (Lichess, Chess.com studies, ChessBase) the homemade parser was never tested
+   against.
+
+**Done when:** all 64 PGN tests pass against the adapter, no caller changed, and
+a multi-game, variation-heavy real-world PGN round-trips (parse → navigate →
+write-back) correctly.
+
+**Likeliest gaps:** null moves and `[%clk]` stripping — the library's AST may
+expose these differently; cover them explicitly in the adapter.

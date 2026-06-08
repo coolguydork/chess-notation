@@ -26,28 +26,18 @@ tests/
 Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer) belongs in `view/`, not `plugin/`.
 
 ### `core/` — Chess logic
-- Board state, move generation, rule enforcement
-- FEN parsing and serialization (`fen.ts`)
-- PGN parsing — moves, comments, NAGs, variations (`pgn.ts`)
-- Move application — SAN to new `BoardState` (`moves.ts`)
-- Legal move generation with check/pin filtering, castling safety, en passant (`legal.ts`)
-- No DOM, no Obsidian, no side effects
-- Every public function must be pure and unit-testable in isolation
+- Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN — moves, comments, NAGs, variations), `moves.ts` (SAN → new `BoardState`), `legal.ts` (legal moves with check/pin filtering, castling safety, en passant), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
+- No DOM, no Obsidian, no side effects. Every public function pure and unit-testable in isolation.
 
 ### `render/` — Board rendering
-- Produces SVG from a board state value object (from `core/`)
-- Accepts a config object (colors, piece theme, orientation, highlighted squares)
-- `controls.ts` — `buildSnapshots()` + `renderControls()` for PGN viewer HTML
-- No Obsidian imports — must be usable in a plain browser or test environment
-- Piece assets are referenced by path/URL injected via config, never hardcoded
+- Produces SVG from a `core/` board-state value object + a config (colors, theme, orientation, highlights).
+- `controls.ts` — `renderControls()` / `buildMoveListHtml()` (PGN viewer HTML); consumes the `core/tree.ts` move tree, never builds one.
+- No Obsidian imports — usable in a plain browser or test environment. Piece assets referenced by injected path/URL, never hardcoded.
 
 ### `plugin/` — Obsidian integration
-- Registers the fenced code block processor (` ```chess `)
-- Owns Obsidian settings (persisted via `plugin.loadData()` / `plugin.saveData()`)
-- Settings tab: default theme, square size, coordinates toggle
-- Passes user settings down to `render/` as a config object
-- Handles lifecycle: `onload`, `onunload`
-- Must not contain chess logic or rendering logic — only wiring
+- Registers the ` ```chess ` block processor; owns settings (persisted via `loadData()`/`saveData()`), the settings tab (default theme, square size, coordinates toggle), and the `onload`/`onunload` lifecycle.
+- Passes user settings down to `render/` as a config object.
+- Wiring only — no chess logic, no rendering logic.
 
 ---
 
@@ -96,46 +86,16 @@ theme is a one-line entry in that record.
 
 ## Phases
 
-### Phase 1 — Foundation ✅
-- Parse `chess` code blocks
-- Render a static board from FEN
-- Orientation support (flip board)
-- Unit tests for FEN parsing and board rendering logic
+### Phases 1–4 ✅
+- **1 Foundation:** parse `chess` blocks; static board from FEN; orientation; FEN/render unit tests.
+- **2 PGN & navigation:** PGN parser (moves, comments, NAGs, variations); full move engine (castling, en passant, promotion); prev/next + clickable move list.
+- **3 Interactivity:** click/tap moves validated against `core/` legal moves; selected/target highlighting; pointer events (mouse + touch).
+- **4 Polish:** six themes + `theme:` key; settings tab (theme, square size, coordinates); responsive/mobile board; `styles.css` shipped with `main.js`.
 
-### Phase 2 — PGN & move navigation ✅
-- PGN parser: moves, comments, NAGs, variations
-- Move application engine: all piece types, castling, en passant, promotion
-- Step through moves with prev/next controls
-- Move list alongside board; click a move to jump to it
-
-### Phase 3 — Interactivity ✅
-- Click/tap piece moves (validates against legal moves from `core/`)
-- Legal move highlighting: selected square tinted, target squares dotted
-- Pointer events (works on mouse and touch)
-
-### Phase 4 — Polish ✅
-- Six named board color themes; `theme:` key in chess blocks
-- Obsidian settings tab: default theme, square size, coordinates toggle
-- Responsive board (fills narrow viewports); mobile touch support
-- `styles.css` built and shipped alongside `main.js`
-
-### Phase 5 — Engine integration
-- Analysis mode: send current position to an engine, display top moves and
-  evaluation on the board
-- Engine play mode: human vs. engine, move validation via `core/` rules engine
-- Engine communication lives in `core/engine.ts` — pure logic, no Obsidian, no
-  rendering
-- `plugin/` wires up the UI controls; `render/` highlights suggested moves using
-  the same highlight API added in Phase 3
-
-**Open decision (resolve in Phase 5):** how Stockfish is delivered:
-
-| Option | Pros | Cons |
-|---|---|---|
-| WASM (bundled) | Zero user setup, fully offline | ~5MB+ bundle size increase |
-| External binary | Small bundle, full engine strength | User must install Stockfish separately |
-
-Do not make architectural decisions that would foreclose either option.
+### Phase 5 — Engine integration 🚧
+- **Analysis mode ✅** — send the position to Stockfish; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
+- **Engine play mode** (human vs. engine, validated via `core/` rules) — not yet built; reuse `commitMove`.
+- **Stockfish delivery — both supported:** WASM (bundled; offline, zero setup; larger bundle) and an external binary (small bundle, full strength, user-installed). The external-binary path is UCI-generic; the WASM path is Stockfish-specific by design.
 
 ---
 
@@ -149,13 +109,8 @@ Do not make architectural decisions that would foreclose either option.
   mutations return new objects rather than modifying in place.
 - **Explicit return types** on all exported functions.
 - **Tests live next to their layer** — `tests/core/`, `tests/render/`, etc.
-- **Default to TDD (test-first) where practical**, but don't be dogmatic — take it
-  case by case. Pure functions with clear inputs/outputs (parsers, rule checks)
-  are strong TDD candidates. Code whose shape is still being discovered (SVG
-  output, plugin lifecycle) may be written first and pinned with tests once the
-  design settles. The goal is confidence, not ceremony.
-- **No third-party chess libraries** for core logic (we own the rules engine).
-  Third-party libs are acceptable in `render/` for SVG utilities if needed.
+- **Default to TDD where practical, not dogmatically.** Pure functions with clear I/O (parsers, rule checks) are strong test-first candidates; code whose shape is still emerging (SVG output, plugin lifecycle) may be written first and pinned with tests once it settles. Goal: confidence, not ceremony.
+- **Use the best, battle-tested open-source library available — don't reinvent the wheel.** In every layer, prefer a well-maintained, widely-adopted library over a homemade one; build new *only* for a real, stated reason. We stick to this as much as possible: reinvented wheels usually come out square, and the ride has been bumpy because of it (see [`pgn-viewer-retrospective2.md`](pgn-viewer-retrospective2.md)).
 - Commit messages: imperative mood, short subject line (`Add FEN parser`,
   `Fix castling rights after rook capture`).
 
@@ -165,79 +120,44 @@ Do not make architectural decisions that would foreclose either option.
 
 | Decision | Rationale |
 |---|---|
+| Library-first: use the best battle-tested open-source library; don't reinvent the wheel | Less code to own and debug; inherits years of edge-case coverage. Building our own needs a real, stated reason — reinvented wheels come out square. See [retrospective 2](pgn-viewer-retrospective2.md) |
 | `core/` has zero Obsidian imports | Keeps chess logic testable outside Obsidian and reusable |
-| YAML inside the code block | Human-readable, extensible without breaking old blocks |
+| `js-yaml` for the chess block body | Human-readable, extensible without breaking old blocks; a battle-tested parser instead of a hand-rolled one (library-first) |
 | SVG rendering (not canvas) | SVG is accessible, scalable, and inspectable in devtools |
-| Own rules engine, no chess lib | Avoids opaque dependency; rules engine is small and well-scoped |
-| Three-layer architecture | Enforces separation so phases don't require refactoring layer boundaries |
+| Rules engine currently homemade (`core/legal.ts`, `moves.ts`, `fen.ts`) | Predates library-first and is the most correctness-critical code; treat as a candidate to revisit against `chess.js`, not a permanent exception. See [retrospective 2](pgn-viewer-retrospective2.md) |
+| Four-layer architecture (`core → render → view → plugin`) | Enforces separation so phases don't require refactoring layer boundaries |
 | Piece assets default to bundled | Obsidian is local-first; offline must always work without configuration |
 | Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |
 | Themes as named presets | Easy to extend; per-block `theme:` key overrides the plugin default |
 
 ## Lessons learned (`plugin/` layer discipline)
 
-The three-layer boundary held perfectly across all phases — `core/` and
-`render/` stayed clean and barely churned. **Every painful rewrite happened in
-`plugin/`, where stateful UI wiring lives.** These principles are the distilled
-cost of those rewrites; apply them to any new `plugin/` work, especially the
-PGN viewer rewrite tracked in [`pgn-viewer-retrospective.md`](pgn-viewer-retrospective.md).
+The layer boundary held: `core/` and `render/` barely churned. **Every painful
+rewrite happened in `plugin/`, where stateful UI wiring lives.** Apply these to
+any new `plugin/` work (full post-mortem in [`pgn-viewer-retrospective.md`](pgn-viewer-retrospective.md)):
 
-- **Model for the next phase, not just the current one.** The biggest rewrites
-  all came from a data/render shape that fit the current scope but not the known
-  future one: `Snapshot[]` → `MoveNode` tree (variations were already planned),
-  full re-render → DOM-stable mount (interactivity was already planned). When the
-  Phases section names a future requirement, give the *shape* room for it now,
-  even if the UI comes later. A linear game is just a tree with no branches.
-
-- **One owner per piece of mutable state.** Duplicating state across closures and
-  syncing it by hand is the root smell behind most viewer bugs (e.g. `current`
-  living in both the viewer and the block-processor closure). State lives in
-  exactly one place; others observe it via an event/hook, never via a callback
-  that re-enters and re-sets it.
-
-- **One writer per shared DOM node.** A node mutated by several code paths (the
-  board: interactive + hover + engine arrows + animation) races and goes stale.
-  Give each shared node a single owner; everything else calls a method on that
-  owner instead of writing `innerHTML` directly.
-
-- **Stable skeleton, delegated events, region re-renders.** Build the container
-  DOM once; re-render only the inner region that changed; attach listeners to
-  stable parents so they survive `innerHTML` swaps. Never rebuild a subtree that
-  owns event handlers or transient state.
-
-- **Side effects fire on the transition that warrants them.** Persisting,
-  network, or file writes belong on the specific transition that changes the
-  underlying data — not on a catch-all navigation handler. (Write-back belongs on
-  a move/promote, not on every prev/next.)
-
-- **Keep `plugin/` thin; extract an owning class before a closure grows stateful.**
-  When block-processor wiring starts accumulating navigation/animation/lifecycle
-  state, that is the signal to extract a small class that owns it — not to add
-  another closure variable.
+- **Model for the next phase, not just the current one.** The big rewrites came from a shape that fit current scope but not the known-future one (`Snapshot[]` → `MoveNode` tree; full re-render → DOM-stable mount). Give the *shape* room for named future requirements now. A linear game is just a tree with no branches.
+- **One owner per piece of mutable state.** Duplicating state across closures and hand-syncing it is the root of most viewer bugs (e.g. `current` in both viewer and block processor). State lives in one place; others observe via an event/hook, never a callback that re-enters and re-sets it.
+- **One writer per shared DOM node.** A node mutated by several paths (board: interactive + hover + arrows + animation) races and goes stale. One owner per node; everyone else calls a method, never writes `innerHTML` directly.
+- **Stable skeleton, delegated events, region re-renders.** Build the container once; re-render only the changed region; attach listeners to stable parents so they survive `innerHTML` swaps.
+- **Side effects fire on the transition that warrants them.** Persist/network/file writes belong on the transition that changes the data, not a catch-all nav handler (write-back on move/promote, not every prev/next).
+- **Keep `plugin/` thin; extract an owning class before a closure grows stateful.** When wiring accumulates navigation/animation/lifecycle state, extract a small class that owns it rather than adding another closure variable.
 
 ## Piece asset strategy
 
-Pieces are resolved via a `PieceSource` discriminated union injected into the
-render config. The renderer never has knowledge of where assets come from.
+Pieces resolve via a `PieceSource` discriminated union injected into the render
+config — the renderer never knows where assets come from:
 
 ```ts
 type PieceSource =
   | { type: "bundled" }                   // default — SVGs shipped with the plugin
-  | { type: "cdn"; baseUrl: string }      // e.g. a Lichess or custom piece set URL
-  | { type: "local"; vaultPath: string }  // future: user's own pieces inside their vault
+  | { type: "cdn"; baseUrl: string }      // a Lichess or custom piece-set URL
+  | { type: "local"; vaultPath: string }  // future: user's own pieces in their vault
 ```
 
-**Default:** `{ type: "bundled" }` — works offline, zero configuration required.
-
-**CDN option:** user can supply a `baseUrl` in plugin settings. The renderer
-constructs piece URLs as `{baseUrl}/{color}{piece}.svg`
-(e.g. `https://example.com/pieces/wK.svg`).
-
-**Local option:** reserved for Phase 4. Allows a vault-relative path to a
-folder of SVG files.
-
-The bundled piece set ships in `src/render/pieces/` as plain SVG files and is
-included in the esbuild bundle.
+- **`bundled` (default)** — works offline, zero config. Ships in `src/render/pieces/`, included in the esbuild bundle.
+- **`cdn`** — user supplies `baseUrl` in settings; URLs built as `{baseUrl}/{color}{piece}.svg` (e.g. `…/wK.svg`).
+- **`local`** — future: a vault-relative folder of SVGs.
 
 ---
 
@@ -248,7 +168,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (289 tests across 9 suites)
+npm test           # vitest unit tests (314 tests across 10 suites)
 npm run dev        # watch mode
 ```
 
