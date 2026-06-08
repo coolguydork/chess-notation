@@ -136,34 +136,6 @@ export function attachMove(current: MoveNode, san: string, newState: BoardState,
 }
 
 // ---------------------------------------------------------------------------
-// promoteVariation
-// Swaps a variation head with the current mainline move so that the variation
-// becomes the new mainline and the old mainline becomes a variation.
-//
-// Before:  parent → mainNode (variationHeads: [varHead, ...])
-// After:   parent → varHead  (variationHeads: [mainNode, ...])
-//          mainNode loses varHead from its variationHeads
-// ---------------------------------------------------------------------------
-
-export function promoteVariation(varHead: MoveNode): void {
-  const parent = varHead.parent;
-  if (!parent?.next) return;
-
-  const mainNode = parent.next;
-  const idx = mainNode.variationHeads.indexOf(varHead);
-  if (idx === -1) return;
-
-  // Detach varHead from mainNode's variation list
-  mainNode.variationHeads.splice(idx, 1);
-
-  // Old mainline becomes the first variation of varHead
-  varHead.variationHeads.unshift(mainNode);
-
-  // varHead takes over as mainline
-  parent.next = varHead;
-}
-
-// ---------------------------------------------------------------------------
 // nodeToPath / pathToNode
 // Serialise/restore the viewer's position as a sequence of SANs from root.
 // ---------------------------------------------------------------------------

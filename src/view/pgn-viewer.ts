@@ -1,5 +1,5 @@
 import { buildMoveListHtml } from "../render/controls";
-import { findNodeById, attachMove, promoteVariation, nodeToPath, pathToNode } from "../core/tree";
+import { findNodeById, attachMove, nodeToPath, pathToNode } from "../core/tree";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
@@ -19,7 +19,7 @@ interface PgnViewerState {
   engineArrows: EngineArrow[];
 }
 
-export type ChangeReason = "navigate" | "move" | "promote" | "load-game" | "flip";
+export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -114,12 +114,6 @@ export class PgnViewer {
     // Move list: click delegation
     this.moveListEl.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
-      const promoteId = t.closest<HTMLElement>("[data-promote-id]")?.dataset.promoteId;
-      if (promoteId) {
-        const n = findNodeById(this.state.root, Number(promoteId));
-        if (n) this.promote(n);
-        return;
-      }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
       if (nodeId) {
         const n = findNodeById(this.state.root, Number(nodeId));
@@ -272,12 +266,6 @@ export class PgnViewer {
     this.state = { ...this.state, current: newNode, engineArrows: [] };
     this.render();
     this.emit("move");
-  }
-
-  promote(varHead: MoveNode): void {
-    promoteVariation(varHead);
-    this.render();
-    this.emit("promote");
   }
 
   setEngineArrows(arrows: EngineArrow[]): void {

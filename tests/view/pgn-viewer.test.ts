@@ -210,37 +210,6 @@ describe("PgnViewer (state-machine)", () => {
     });
   });
 
-  describe("promote", () => {
-    it("emits promote", () => {
-      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
-      const { viewer } = makeViewer(root, root);
-
-      // Add a variation node manually
-      const d4Result = applyMoveEx(startState, "d4");
-      const e4Node = root.next!;
-      const d4Node: MoveNode = {
-        id: 9999,
-        san: "d4",
-        moveNumber: 1,
-        color: "w",
-        state: d4Result.state,
-        from: d4Result.from,
-        to: d4Result.to,
-        parent: root,
-        next: null,
-        variationHeads: [],
-      };
-      e4Node.variationHeads.push(d4Node);
-
-      const events: ChangeEvent[] = [];
-      viewer.onChange((e) => events.push(e));
-      viewer.promote(d4Node);
-
-      expect(events).toHaveLength(1);
-      expect(events[0].reason).toBe("promote");
-    });
-  });
-
   describe("setEngineArrows", () => {
     it("calls board.setEngineArrows and does NOT emit a change event", () => {
       const root = buildMoveTree(STARTING_FEN, []);

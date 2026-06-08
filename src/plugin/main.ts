@@ -647,7 +647,7 @@ export default class ChessPlugin extends Plugin {
             });
 
             viewer.onChange((e) => {
-              if (e.reason !== "move" && e.reason !== "promote") return;
+              if (e.reason !== "move") return;
               writeBackFenBlock(appRef, ctx, el, serializeMoveTree(e.root, "*"));
             });
 
@@ -729,7 +729,7 @@ export default class ChessPlugin extends Plugin {
 
           // Write-back listener (single game only, tree mutations only)
           viewer.onChange((e) => {
-            if (e.reason !== "move" && e.reason !== "promote") return;
+            if (e.reason !== "move") return;
             if (games.length !== 1) return;
             writeBackPgn(app, ctx, el, serializeMoveTree(e.root, games[0].result));
           });

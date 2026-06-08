@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove, promoteVariation } from "../../src/render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, attachMove } from "../../src/render/controls";
 import { applyMove } from "../../src/core/moves";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
@@ -505,59 +505,5 @@ describe("attachMove", () => {
     const e5Node = attachMove(e4Node, "e5", e5State);
     expect(e5Node.color).toBe("b");
     expect(e5Node.moveNumber).toBe(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// promoteVariation
-// ---------------------------------------------------------------------------
-
-describe("promoteVariation", () => {
-  function buildTree(): { root: MoveNode; e4: MoveNode; e5: MoveNode; c5: MoveNode } {
-    const root = buildMoveTree(STARTING_FEN, []);
-    const e4 = attachMove(root, "e4", applyMove(root.state, "e4"));
-    const e5 = attachMove(e4, "e5", applyMove(e4.state, "e5"));
-    const c5 = attachMove(e4, "c5", applyMove(e4.state, "c5"));
-    return { root, e4, e5, c5 };
-  }
-
-  it("makes the variation the new mainline", () => {
-    const { e4, c5 } = buildTree();
-    promoteVariation(c5);
-    expect(e4.next).toBe(c5);
-  });
-
-  it("demotes the old mainline to a variation of the promoted node", () => {
-    const { e4, e5, c5 } = buildTree();
-    promoteVariation(c5);
-    expect(c5.variationHeads).toContain(e5);
-    expect(c5.variationHeads[0]).toBe(e5);
-  });
-
-  it("removes the promoted node from the old mainline's variationHeads", () => {
-    const { e5, c5 } = buildTree();
-    promoteVariation(c5);
-    expect(e5.variationHeads).not.toContain(c5);
-  });
-
-  it("is idempotent: promoting the mainline again after promotion reverses it", () => {
-    const { e4, e5, c5 } = buildTree();
-    promoteVariation(c5);
-    // c5 is now mainline; e5 is a variation of c5 — promote e5 back
-    promoteVariation(e5);
-    expect(e4.next).toBe(e5);
-    expect(e5.variationHeads).toContain(c5);
-  });
-
-  it("no-ops when the node has no parent", () => {
-    const root = buildMoveTree(STARTING_FEN, []);
-    expect(() => promoteVariation(root)).not.toThrow();
-  });
-
-  it("no-ops when the node is not found in variationHeads", () => {
-    const { e4, e5 } = buildTree();
-    // e5 is the mainline, not a variation — should not throw
-    expect(() => promoteVariation(e5)).not.toThrow();
-    expect(e4.next).toBe(e5); // unchanged
   });
 });

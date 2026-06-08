@@ -1,7 +1,7 @@
-import { buildMoveTree, findNodeById, attachMove, promoteVariation } from "../core/tree";
+import { buildMoveTree, findNodeById, attachMove } from "../core/tree";
 import type { MoveNode } from "../core/types";
 
-export { buildMoveTree, findNodeById, attachMove, promoteVariation };
+export { buildMoveTree, findNodeById, attachMove };
 
 // ---------------------------------------------------------------------------
 // NAG symbols
@@ -81,7 +81,6 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     for (const varHead of cur.variationHeads) {
       out.push(`<span class="chess-variation">`);
       out.push(`<span class="chess-variation-paren">(</span>`);
-      out.push(`<button class="chess-promote-btn" data-promote-id="${varHead.id}" title="Promote to main line">⇑</button>`);
       renderLine(varHead, currentId, out, /* firstInLine */ true);
       out.push(`<span class="chess-variation-paren">)</span>`);
       out.push(`</span>`);
