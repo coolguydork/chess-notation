@@ -1,6 +1,6 @@
 import { buildMoveListHtml } from "../render/controls";
 import { findNodeById, attachMove, promoteVariation, nodeToPath, pathToNode } from "../core/tree";
-import { mountInteractiveBoard } from "./interactive-board";
+import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./interactive-board";
 import type { MoveNode, BoardState } from "../core/types";
 import type { BoardConfig, EngineArrow } from "../render/config";
@@ -98,7 +98,7 @@ export class PgnViewer {
     viewerDiv.appendChild(this.moveListEl);
 
     // Mount interactive board
-    const factory = this._boardFactory ?? mountInteractiveBoard;
+    const factory = this._boardFactory ?? mountCmBoard;
     this.board = factory(
       this.boardWrapperEl,
       this.state.current.state,

@@ -34,6 +34,9 @@ export interface BoardConfig {
   // Resolves a piece to a URL or data-URI for use in <image href="...">.
   // Provided by plugin/ based on pieceSource; render/ never constructs URLs.
   resolvePieceUrl: (piece: Piece) => string;
+  // Resolves a cm-chessboard asset (e.g. "pieces/standard.svg") to an absolute
+  // URL. Provided by plugin/ as an Obsidian resource path; used by view/cm-board.
+  resolveAssetUrl?: (relPath: string) => string;
   // Optional square highlights: set of board indices to overlay.
   // selectedSquare — the clicked piece's square (filled tint).
   // legalTargets   — destination squares for the selected piece (dot overlay).

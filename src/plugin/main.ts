@@ -629,6 +629,7 @@ export default class ChessPlugin extends Plugin {
             orientation: params.orientation ?? DEFAULT_BOARD_CONFIG.orientation,
             resolvePieceUrl: (piece) =>
               resolvePieceUrl(piece, pieceSource, getResourcePath, pluginDir),
+            resolveAssetUrl: (rel) => getResourcePath(`${pluginDir}/cm-chessboard/${rel}`),
           };
 
           if (params.fen && !params.pgn) {
