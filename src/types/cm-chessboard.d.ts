@@ -8,9 +8,16 @@ declare module "cm-chessboard/src/Chessboard.js" {
 
   export interface CmMoveInputEvent {
     type: string;
+    square?: string;
     squareFrom?: string;
     squareTo?: string;
     [k: string]: unknown;
+  }
+
+  export interface CmPromotionResult {
+    type: string;
+    square?: string;
+    piece?: string;
   }
 
   export class Chessboard {
@@ -27,6 +34,7 @@ declare module "cm-chessboard/src/Chessboard.js" {
     removeMarkers(type?: unknown, square?: string): void;
     addArrow(type: unknown, from: string, to: string): void;
     removeArrows(type?: unknown, from?: string, to?: string): void;
+    showPromotionDialog(square: string, color: string, callback: (result: CmPromotionResult) => void): void;
   }
 }
 
@@ -38,4 +46,9 @@ declare module "cm-chessboard/src/extensions/markers/Markers.js" {
 declare module "cm-chessboard/src/extensions/arrows/Arrows.js" {
   export const ARROW_TYPE: Record<string, { class: string }>;
   export class Arrows {}
+}
+
+declare module "cm-chessboard/src/extensions/promotion-dialog/PromotionDialog.js" {
+  export const PROMOTION_DIALOG_RESULT_TYPE: Record<string, string>;
+  export class PromotionDialog {}
 }
