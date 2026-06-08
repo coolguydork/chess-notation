@@ -136,7 +136,8 @@ export function mountCmBoard(
   }
 
   // Enabled for both colours; validation restricts to the side to move.
-  board.enableMoveInput(inputHandler);
+  // Read-only blocks (config.interactive === false) get no move input.
+  if (config.interactive !== false) board.enableMoveInput(inputHandler);
 
   // ----- user-drawn arrows (right-drag); left-click clears them -------------
 

@@ -1,5 +1,7 @@
 import { buildMoveListHtml } from "../render/controls";
-import { findNodeById, attachMove, nodeToPath, pathToNode } from "../core/tree";
+import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
+import { addMoveAt, projectGame } from "../core/game";
+import type { GameEditor } from "../core/game";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
@@ -50,6 +52,9 @@ export class PgnViewer {
     private config: BoardConfig,
     current: MoveNode,
     result: string,
+    // The editable game. When present, board moves and engine grafts are routed
+    // through cm-chess; when absent the viewer is read-only (multi-game blocks).
+    private editor?: GameEditor,
     private _boardFactory?: (
       wrapper: HTMLElement,
       state: BoardState,
@@ -97,7 +102,8 @@ export class PgnViewer {
     this.moveListEl.className = "chess-move-list-container";
     viewerDiv.appendChild(this.moveListEl);
 
-    // Mount interactive board
+    // Mount interactive board (read-only when there is no editor)
+    this.config.interactive = this.editor !== undefined;
     const factory = this._boardFactory ?? mountCmBoard;
     this.board = factory(
       this.boardWrapperEl,
@@ -260,10 +266,13 @@ export class PgnViewer {
   }
 
   commitMove(san: string, from: number, to: number, newState: BoardState): void {
-    const newNode = attachMove(this.state.current, san, newState, from, to);
-    const lm = { from, to };
-    this.board.setState(newState, lm);
-    this.state = { ...this.state, current: newNode, engineArrows: [] };
+    if (!this.editor) return; // read-only block
+    const path = nodeToPath(this.state.current);
+    addMoveAt(this.editor, path, san);
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, [...path, san]);
+    this.board.setState(newState, { from, to });
+    this.state = { ...this.state, root, current, engineArrows: [] };
     this.render();
     this.emit("move");
   }
@@ -304,11 +313,21 @@ export class PgnViewer {
 
   /** Graft a decoded engine PV line as variations starting from `fromNode`, navigate to the last grafted node. */
   graftLine(fromNode: MoveNode, pvMoves: PvMove[]): void {
-    let node = fromNode;
+    if (!this.editor) return; // read-only block
+    let path = nodeToPath(fromNode);
     for (const m of pvMoves) {
-      node = attachMove(node, m.san, m.state, m.from, m.to);
+      addMoveAt(this.editor, path, m.san);
+      path = [...path, m.san];
     }
-    this.goTo(node);
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, path);
+    this.clearHover();
+    this.cancelAnim?.();
+    this.cancelAnim = null;
+    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+    this.board.setState(current.state, lm);
+    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.render();
     this.emit("move");
   }
 }

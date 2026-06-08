@@ -49,6 +49,9 @@ export interface BoardConfig {
   engineArrows?: EngineArrow[];
   // User-drawn arrows with optional text labels.
   userArrows?: UserArrow[];
+  // Whether the board accepts move input. False for read-only blocks (multi-game
+  // and games cm-chess can't load); defaults to true.
+  interactive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
