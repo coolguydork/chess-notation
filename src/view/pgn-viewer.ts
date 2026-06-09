@@ -47,6 +47,18 @@ export class PgnViewer {
   private hoveredId: number | null = null;
   private cancelAnim: (() => void) | null = null;
   private cancelHoverAnim: (() => void) | null = null;
+  // --- Move-list height management (auto-fit short games + drag-to-resize persist) ---
+  // All of this is inert until mount() enables it (tests skip mount()), and a no-op
+  // where ResizeObserver is unavailable.
+  private moveListResizeObserver: ResizeObserver | null = null;
+  private heightMgmtEnabled = false;
+  private preferredMoveListHeight: number | null = null; // user/persisted cap (px), null = auto
+  private defaultMoveListHeight = 0;                       // CSS default height, captured at mount
+  private minMoveListHeight = 0;
+  private maxMoveListHeight = Number.POSITIVE_INFINITY;
+  private lastMoveListHeight: number | null = null;       // height we last applied, to spot user drags
+  private onMoveListResizeCb: ((px: number) => void) | null = null;
+  private moveListResizeTimer: number | null = null;
   // Plugin-supplied handler that raises the move context menu (Obsidian Menu lives
   // in plugin/; the viewer only detects the trigger and owns the edit ops).
   private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
@@ -119,6 +131,7 @@ export class PgnViewer {
     this.moveListEl = document.createElement("div");
     this.moveListEl.className = "chess-move-list-container";
     viewerDiv.appendChild(this.moveListEl);
+    this.setupMoveListHeight();
 
     // Mount interactive board (read-only when there is no editor)
     this.config.interactive = this.editor !== undefined;
@@ -239,6 +252,12 @@ export class PgnViewer {
     this.cancelAnim = null;
     this.cancelHoverAnim?.();
     this.cancelHoverAnim = null;
+    this.moveListResizeObserver?.disconnect();
+    this.moveListResizeObserver = null;
+    if (this.moveListResizeTimer !== null) {
+      window.clearTimeout(this.moveListResizeTimer);
+      this.moveListResizeTimer = null;
+    }
     this.listeners = [];
   }
 
@@ -282,11 +301,94 @@ export class PgnViewer {
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
     this.headersEl.innerHTML = buildHeaderHtml(this.state.headers);
     this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined);
+    this.fitMoveListHeight();
     this.scrollActiveMoveIntoView();
   }
 
   private scrollActiveMoveIntoView(): void {
     this.moveListEl.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Move-list height: auto-fit short games, let the user drag to resize, and
+  // remember the dragged height (the plugin persists it globally).
+  // ---------------------------------------------------------------------------
+
+  // Seed the preferred (persisted) height before mount, or update it later.
+  // null restores the auto/default behaviour. Re-fits immediately when mounted.
+  setMoveListHeight(px: number | null): void {
+    this.preferredMoveListHeight = px;
+    if (this.heightMgmtEnabled) this.fitMoveListHeight();
+  }
+
+  // Register the callback fired (debounced) when the user drags the resize handle.
+  onMoveListResize(fn: (px: number) => void): void {
+    this.onMoveListResizeCb = fn;
+  }
+
+  private setupMoveListHeight(): void {
+    if (typeof ResizeObserver === "undefined") return;
+    // Capture the CSS bounds before we ever set an inline height. With the
+    // container's zero vertical padding/border, computed height == offsetHeight,
+    // so these px values line up with what we later apply and observe.
+    const cs = getComputedStyle(this.moveListEl);
+    this.defaultMoveListHeight = parseFloat(cs.height) || 320;
+    this.minMoveListHeight = parseFloat(cs.minHeight) || 0;
+    const maxH = parseFloat(cs.maxHeight);
+    this.maxMoveListHeight = maxH > 0 ? maxH : Number.POSITIVE_INFINITY;
+    this.heightMgmtEnabled = true;
+    this.moveListResizeObserver = new ResizeObserver(() => this.onMoveListResized());
+    this.moveListResizeObserver.observe(this.moveListEl);
+  }
+
+  // Size the container to min(content, cap): short games hug their moves (no
+  // empty box, no scrollbar); long games stop at the cap and scroll internally.
+  // cap = the user's preferred/persisted height, else the CSS default.
+  private fitMoveListHeight(): void {
+    if (!this.heightMgmtEnabled) return;
+    const el = this.moveListEl;
+    const inner = el.firstElementChild as HTMLElement | null;
+    // No moves yet (e.g. a FEN-only position): collapse so there's no empty box.
+    if (!inner) {
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "";
+    const content = Math.ceil(inner.getBoundingClientRect().height);
+    if (content === 0) return; // not laid out yet
+    const cap = this.preferredMoveListHeight ?? this.defaultMoveListHeight;
+    const target = Math.max(this.minMoveListHeight, Math.min(this.maxMoveListHeight, content, cap));
+    el.style.height = `${target}px`;
+    // Remember what actually rendered so the observer can distinguish our own
+    // change from a user drag.
+    this.lastMoveListHeight = el.offsetHeight;
+  }
+
+  private onMoveListResized(): void {
+    if (!this.heightMgmtEnabled) return;
+    // No height applied yet — this is the initial layout becoming measurable
+    // (e.g. the block was rendered detached and just got attached). Fit it rather
+    // than mistaking it for a drag.
+    if (this.lastMoveListHeight === null) {
+      this.fitMoveListHeight();
+      return;
+    }
+    // Ignore the resize fitMoveListHeight() just caused; only a handle drag moves
+    // the height away from what we last applied.
+    const h = this.moveListEl.offsetHeight;
+    if (Math.abs(h - this.lastMoveListHeight) <= 1) return;
+    this.lastMoveListHeight = h;
+    this.preferredMoveListHeight = h;
+    this.persistMoveListHeight(h);
+  }
+
+  // Debounce so a drag (many resize events) yields one save, not hundreds.
+  private persistMoveListHeight(px: number): void {
+    if (this.moveListResizeTimer !== null) window.clearTimeout(this.moveListResizeTimer);
+    this.moveListResizeTimer = window.setTimeout(() => {
+      this.moveListResizeTimer = null;
+      this.onMoveListResizeCb?.(px);
+    }, 300);
   }
 
   goTo(node: MoveNode): void {
