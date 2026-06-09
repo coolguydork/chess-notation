@@ -438,7 +438,7 @@ npm install
 |---|---|
 | `npm run build` | Type-check + production bundle → `dist/main.js` + `dist/styles.css` |
 | `npm run dev` | Watch mode (rebuilds on save, skips type-check) |
-| `npm test` | Run all 400 tests with Vitest |
+| `npm test` | Run all 410 tests with Vitest |
 
 **Deploy to the test vault:**
 
@@ -496,9 +496,8 @@ A leaf package (MIT, liftable) that imports nothing from the rest of the app. Cl
 
 | File | Responsibility |
 |---|---|
-| `config.ts` | `BoardConfig`, `BoardColors`, the six theme definitions, `EngineArrow`, piece-source resolution |
+| `config.ts` | `BoardConfig`, `BoardColors`, the six theme definitions, `EngineArrow`, asset-URL resolution |
 | `controls.ts` | Build the PGN viewer / move-list HTML from a `MoveNode` tree |
-| `pieces/` | Bundled SVG piece set |
 
 No Obsidian imports — usable in any browser or test environment.
 
@@ -534,10 +533,4 @@ Markdown note
 
 ### Piece assets
 
-Pieces are the [cburnett](https://github.com/nicowillis/chess-svg) SVG set, bundled inside the plugin. The renderer receives a `resolvePieceUrl` function injected from `plugin/` — it never constructs asset URLs itself. This indirection supports three piece sources:
-
-| Source | How it works |
-|---|---|
-| `bundled` (default) | SVGs ship with the plugin; resolved via Obsidian's `getResourcePath` |
-| `cdn` | User supplies a base URL; renderer appends `/{color}{piece}.svg` |
-| `local` | Vault-relative path to a folder of SVG files |
+Board pieces are cm-chessboard's **standard** SVG sprite sheet. It's bundled into the plugin's `cm-chessboard/` asset folder at build time (see [`esbuild.config.mjs`](esbuild.config.mjs), which also copies the marker, arrow, and promotion-dialog sprites) and resolved at runtime through a `resolveAssetUrl` function injected from `plugin/` → Obsidian's `getResourcePath`. The board never constructs asset URLs itself. Everything ships with the plugin, so boards render **offline with zero configuration** — no CDN, no network.
