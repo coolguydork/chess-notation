@@ -30,7 +30,6 @@ const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 function makeConfig(): BoardConfig {
   return {
     ...DEFAULT_BOARD_CONFIG,
-    resolvePieceUrl: () => "",
   };
 }
 

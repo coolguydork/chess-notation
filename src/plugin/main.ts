@@ -10,7 +10,6 @@ import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
   BoardConfig,
-  PieceSource,
   EngineArrow,
   getBoardColors,
   themeNames,
@@ -18,7 +17,7 @@ import {
 import { scoreToString, uciPvToSan } from "../core/engine";
 import type { UciOptionDef, PvMove } from "../core/engine";
 import { EngineWorker } from "./engine-worker";
-import type { Piece, BoardState, MoveNode, PgnGame } from "../core/types";
+import type { BoardState, MoveNode, PgnGame } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -30,7 +29,6 @@ interface ChessPluginSettings {
   defaultTheme: string;
   squareSize: number;
   showCoordinates: boolean;
-  pieceSource: PieceSource;
   engineMode: "auto" | "external" | "wasm";
   enginePath: string;                      // explicit binary path; empty = auto-discover
   engineDepth: number;
@@ -44,7 +42,6 @@ const DEFAULT_SETTINGS: ChessPluginSettings = {
   defaultTheme: "classic",
   squareSize: 60,
   showCoordinates: true,
-  pieceSource: { type: "bundled" },
   engineMode: "auto",
   enginePath: "",
   engineDepth: 18,
@@ -119,27 +116,6 @@ function parseBlock(source: string): ChessBlockParams {
   }
 
   return params;
-}
-
-// ---------------------------------------------------------------------------
-// Piece URL resolution
-// ---------------------------------------------------------------------------
-
-function resolvePieceUrl(
-  piece: Piece,
-  source: PieceSource,
-  getResourcePath: (path: string) => string,
-  pluginDir: string
-): string {
-  const name = `${piece.color}${piece.type.toUpperCase()}.svg`;
-  switch (source.type) {
-    case "bundled":
-      return getResourcePath(`${pluginDir}/pieces/${name}`);
-    case "cdn":
-      return `${source.baseUrl}/${name}`;
-    case "local":
-      return getResourcePath(`${source.vaultPath}/${name}`);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -827,7 +803,6 @@ export default class ChessPlugin extends Plugin {
           const getResourcePath = (path: string) =>
             this.app.vault.adapter.getResourcePath(path);
 
-          const pieceSource = this.settings.pieceSource;
           const theme = params.theme ?? this.settings.defaultTheme;
 
           const baseConfig: BoardConfig = {
@@ -836,8 +811,6 @@ export default class ChessPlugin extends Plugin {
             squareSize: this.settings.squareSize,
             showCoordinates: this.settings.showCoordinates,
             orientation: params.orientation ?? DEFAULT_BOARD_CONFIG.orientation,
-            resolvePieceUrl: (piece) =>
-              resolvePieceUrl(piece, pieceSource, getResourcePath, pluginDir),
             resolveAssetUrl: (rel) => getResourcePath(`${pluginDir}/cm-chessboard/${rel}`),
           };
 

@@ -132,7 +132,7 @@ theme is a one-line entry in that record.
 | Rules engine via `chess.js` (`core/legal.ts`, `moves.ts` delegate through `chessjs-bridge.ts`) | Library-first; `chess.js 1.x` owns legal moves / application / check detection. `fen.ts` stays homemade (it doubles as the BoardState ↔ FEN conversion primitive). |
 | PGN **edits** via our own `pgn-editor` core (`core/game.ts`) | No well-written MIT edit-capable PGN library exists (kokopu=LGPL-3.0; chessops & @mliebelt=GPL-3.0; cm-chess/cm-pgn=MIT but middling — buggy `undo`, no promote, render bugs) — filling that gap is the *stated reason* the library-first rule allows building. Clean-room parser/serializer + FEN-neutral AST; `GameEditor` owns the AST and validates via `chess.js` (one rules engine again — the old `chess.mjs` dual engine is gone), projects to `MoveNode` for rendering, and serializes the AST directly via `serializeMovetext` (full comment fidelity). Multi-game stays read-only (parsed by our own `parseGames`); a single game we can't parse (strict mode throws) also falls back to read-only. |
 | Four-layer architecture (`core → render → view → plugin`) | Enforces separation so phases don't require refactoring layer boundaries |
-| Piece assets default to bundled | Obsidian is local-first; offline must always work without configuration |
+| Piece assets bundled (cm-chessboard sprites) | Obsidian is local-first; offline must always work without configuration. Sprites are copied into `dist/cm-chessboard/` at build and resolved via `resolveAssetUrl` |
 | Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |
 | Themes as named presets | Easy to extend; per-block `theme:` key overrides the plugin default |
 
@@ -151,19 +151,29 @@ any new `plugin/` work (full post-mortem in [`pgn-viewer-retrospective.md`](pgn-
 
 ## Piece asset strategy
 
-Pieces resolve via a `PieceSource` discriminated union injected into the render
-config — the renderer never knows where assets come from:
+Pieces are drawn by **cm-chessboard** from its own sprite sheet
+(`pieces/standard.svg`), not from a homemade per-piece SVG set. The board
+(`src/view/cm-board.ts`) asks for assets by relative path and the plugin
+resolves them:
 
 ```ts
-type PieceSource =
-  | { type: "bundled" }                   // default — SVGs shipped with the plugin
-  | { type: "cdn"; baseUrl: string }      // a Lichess or custom piece-set URL
-  | { type: "local"; vaultPath: string }  // future: user's own pieces in their vault
+// On BoardConfig (src/render/config.ts), injected by plugin/, consumed by view/cm-board.ts:
+resolveAssetUrl?: (relPath: string) => string;
 ```
 
-- **`bundled` (default)** — works offline, zero config. Ships in `src/render/pieces/`, included in the esbuild bundle.
-- **`cdn`** — user supplies `baseUrl` in settings; URLs built as `{baseUrl}/{color}{piece}.svg` (e.g. `…/wK.svg`).
-- **`local`** — future: a vault-relative folder of SVGs.
+- **Bundled + offline, zero config.** `esbuild.config.mjs` copies the cm-chessboard
+  sprites (`pieces/standard.svg`, `pieces/staunty.svg`, marker/arrow sprites) into
+  `dist/cm-chessboard/`, mirroring the package's `assets/` layout.
+- **The renderer never constructs URLs.** `plugin/` supplies `resolveAssetUrl` as
+  an Obsidian resource path (`{pluginDir}/cm-chessboard/{rel}`); `view/` passes the
+  relative path through. Outside Obsidian (tests/browser) it's optional and falls
+  back to `./assets/{rel}`.
+
+> Historical note: a pre-cm-chessboard design injected a `PieceSource`
+> (`bundled` / `cdn` / `local`) discriminated union plus a `resolvePieceUrl`
+> helper that pointed at a bundled cburnett set in `src/render/pieces/`. The
+> cm-chessboard migration made all of that dead code; it was removed along with
+> the cburnett SVGs.
 
 ---
 
@@ -174,7 +184,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (339 tests across 15 suites)
+npm test           # vitest unit tests (410 tests across 18 suites)
 npm run dev        # watch mode
 ```
 
