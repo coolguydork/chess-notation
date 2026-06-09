@@ -7,8 +7,6 @@ import { applyMoveEx } from "./moves";
 // Types
 // ---------------------------------------------------------------------------
 
-export type EngineMode = "auto" | "external" | "wasm";
-
 export interface CpScore {
   type: "cp";
   value: number; // centipawns, positive = side to move is better

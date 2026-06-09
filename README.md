@@ -367,8 +367,7 @@ Open **Settings → Chess → Engine** to configure:
 
 | Setting | Default | Description |
 |---|---|---|
-| Engine mode | `Auto` | `Auto` tries the PATH and common install locations. `External binary` uses the path you specify. `WASM` is reserved for a future bundled build. |
-| Stockfish binary path | *(empty)* | Absolute path to the executable. Only used when mode is `External binary`, or as a hint when mode is `Auto`. |
+| Engine binary path | *(empty)* | Absolute path to a UCI-compatible engine executable. Leave blank to auto-discover from the PATH and common install locations. |
 | Analysis depth | `18` | Stockfish search depth. 15–18 is strong and fast; 25+ is very strong but may take several seconds. |
 | Lines shown (MultiPV) | `3` | Number of distinct top moves to display. 1 shows only the best move. |
 
