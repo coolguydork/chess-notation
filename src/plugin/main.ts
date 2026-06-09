@@ -5,6 +5,7 @@ import { uciSquareToIndex } from "../core/fen";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
 import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
 import type { GameEditor } from "../core/game";
+import { yamlInlineScalar } from "./yaml-block";
 import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -251,7 +252,7 @@ async function writeBackPgn(
 
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${newPgn}`;
+      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
@@ -277,7 +278,7 @@ async function writeBackFenBlock(
 
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${newPgn}`;
+      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
@@ -286,14 +287,14 @@ async function writeBackFenBlock(
   // No pgn: line yet — insert one after the fen: line
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*fen\s*:/.test(lines[i])) {
-      lines.splice(i + 1, 0, `pgn: ${newPgn}`);
+      lines.splice(i + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
   }
 
   // No fen: or pgn: line — empty block; insert right after the opening fence
-  lines.splice(info.lineStart + 1, 0, `pgn: ${newPgn}`);
+  lines.splice(info.lineStart + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
   await app.vault.modify(abstract, lines.join("\n"));
 }
 
