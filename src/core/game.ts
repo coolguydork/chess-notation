@@ -1,4 +1,4 @@
-import { parse, serializeMovetext } from "../pgn-editor";
+import { parse, serializeInline } from "../pgn-editor";
 import {
   childrenOf,
   resolvePath,
@@ -61,12 +61,13 @@ export function projectGame(editor: GameEditor): MoveNode {
   return buildMoveTree(editor.startFen, astToPgnMoves(editor.moves));
 }
 
-// Serialize the AST directly (movetext + result, no headers — write-back
-// targets a single YAML `pgn:` line). Going through the AST rather than the
-// projected MoveNode tree preserves all three comment positions; the projection
-// (astToPgnMoves) keeps only commentAfter.
+// Serialize the AST to a single-line PGN (header tags + movetext + result, no
+// blank-line separator) so the whole game fits the one YAML `pgn:` line that
+// write-back rewrites. Going through the AST rather than the projected MoveNode
+// tree preserves the header tags and all three comment positions; the
+// projection (astToPgnMoves) keeps neither headers nor commentMove/Before.
 export function gameToPgn(editor: GameEditor, result: string): string {
-  return serializeMovetext({ headers: editor.headers, moves: editor.moves, result });
+  return serializeInline({ headers: editor.headers, moves: editor.moves, result });
 }
 
 // ---------------------------------------------------------------------------

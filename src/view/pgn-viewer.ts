@@ -79,6 +79,10 @@ export class PgnViewer {
     // Build stable DOM skeleton
     const viewerDiv = document.createElement("div");
     viewerDiv.className = "chess-viewer";
+    // Focusable so ←/→ can step through moves once the board is clicked/tabbed
+    // to. Scoping to this element (not document) keeps multiple blocks on a page
+    // from all reacting to one keypress.
+    viewerDiv.tabIndex = 0;
     this.host.appendChild(viewerDiv);
 
     // Game-info header strip (above the board; empty when there are no headers).
@@ -130,6 +134,15 @@ export class PgnViewer {
     // Nav button listeners
     this.navPrevEl.onclick = () => this.goPrev();
     this.navNextEl.onclick = () => this.goNext();
+
+    // Keyboard navigation: ←/→ step through the current line. keydown bubbles
+    // here from whatever child holds focus (board, move list, a button).
+    viewerDiv.addEventListener("keydown", (e) => {
+      if (this.handleNavKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
 
     // Move list: click delegation
     this.moveListEl.addEventListener("click", (e) => {
@@ -304,6 +317,23 @@ export class PgnViewer {
     this.state = { ...this.state, current: node, engineArrows: [] };
     this.render();
     this.emit("navigate");
+  }
+
+  // Map a keydown to a navigation action. Returns true if the key was consumed
+  // (so the listener can preventDefault). Plain ←/→ only — modifier combos are
+  // left for Obsidian/browser shortcuts.
+  private handleNavKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    switch (e.key) {
+      case "ArrowLeft":
+        this.goPrev();
+        return true;
+      case "ArrowRight":
+        this.goNext();
+        return true;
+      default:
+        return false;
+    }
   }
 
   goNext(): void {
