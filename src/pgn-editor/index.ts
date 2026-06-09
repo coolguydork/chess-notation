@@ -10,3 +10,8 @@
 export type { Color, PgnNode, PgnGameAst } from "./types";
 export { parse } from "./parser";
 export { serialize, serializeMovetext } from "./serialize";
+
+// TODO(pgn-editor): grow toward a full PGN-CRUD surface — see ./ROADMAP.md.
+// Next gap is move-level Update (setComment / setNags / promoteVariation), then
+// multi-game parse (parseGames, to retire the @mliebelt GPL dep). Export each
+// here as it lands; keep this barrel the single public API contract.

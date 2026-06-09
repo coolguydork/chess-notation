@@ -160,3 +160,9 @@ export function removeAt(editor: GameEditor, path: string[]): void {
     target.line.length = target.index; // truncate this line from the target on
   }
 }
+
+// TODO(pgn-editor): move-level Update is the next gap (see
+// src/pgn-editor/ROADMAP.md). setComment(path,position,text) / setNags(path,nags)
+// / promoteVariation(path) are FEN-neutral tree edits → implement in pgn-editor
+// and expose through this GameEditor seam; only replaceMove(path,san) needs
+// chess.js validation and stays in this file.
