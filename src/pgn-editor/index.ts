@@ -11,7 +11,19 @@ export type { Color, PgnNode, PgnGameAst } from "./types";
 export { parse } from "./parser";
 export { serialize, serializeMovetext } from "./serialize";
 
-// TODO(pgn-editor): grow toward a full PGN-CRUD surface — see ./ROADMAP.md.
-// Next gap is move-level Update (setComment / setNags / promoteVariation), then
-// multi-game parse (parseGames, to retire the @mliebelt GPL dep). Export each
-// here as it lands; keep this barrel the single public API contract.
+// Structural tree navigation + FEN-neutral edits (move-level Update/Delete).
+export type { NodeLoc, CommentField } from "./edit";
+export {
+  childrenOf,
+  resolvePath,
+  nodeAt,
+  setComment,
+  setNags,
+  removeAt,
+  promoteVariation,
+} from "./edit";
+
+// TODO(pgn-editor): remaining PGN-CRUD surface — see ./ROADMAP.md. Next is
+// multi-game parse (parseGames, to retire the @mliebelt GPL dep), then header
+// CRUD if a consumer needs it. Export each here as it lands; keep this barrel
+// the single public API contract.

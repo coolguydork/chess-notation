@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { gameFromFen, gameFromPgn, projectGame, gameToPgn, addMoveAt, removeAt } from "../../src/core/game";
+import {
+  gameFromFen,
+  gameFromPgn,
+  projectGame,
+  gameToPgn,
+  addMoveAt,
+  removeAt,
+  setComment,
+  setNags,
+  promoteVariation,
+  replaceMove,
+} from "../../src/core/game";
 import { buildMoveTree } from "../../src/core/tree";
 import { parseMultiPGN, serializeMoveTree } from "../../src/core/pgn";
 import { serializeFEN } from "../../src/core/fen";
@@ -160,5 +171,47 @@ describe("gameToPgn", () => {
     const fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
     // cm-pgn's own render() would emit "1. Bb5 ..."; ours respects the FEN.
     expect(gameToPgn(gameFromPgn("3. Bb5 a6", fen), "*")).toBe("3. Bb5 a6 *");
+  });
+});
+
+describe("move-level Update (Tier 1 seam)", () => {
+  it("setComment (after) reaches the projected tree and the PGN", () => {
+    const ed = gameFromPgn("1. e4 e5 2. Nf3");
+    expect(setComment(ed, ["e4"], "commentAfter", "best by test")).toBe(true);
+    expect(projectGame(ed).next!.comment).toBe("best by test");
+    expect(gameToPgn(ed, "*")).toContain("{ best by test }");
+  });
+
+  it("setNags annotates a move", () => {
+    const ed = gameFromPgn("1. e4 e5");
+    setNags(ed, ["e4"], [1]);
+    expect(projectGame(ed).next!.nags).toEqual([1]);
+    expect(gameToPgn(ed, "*")).toContain("e4 $1");
+  });
+
+  it("promoteVariation makes a variation the mainline", () => {
+    const ed = gameFromPgn("1. e4 e5 (1... c5 2. Nf3) 2. Nf3");
+    expect(promoteVariation(ed, ["e4", "c5"])).toBe(true);
+    expect(mainlineSans(projectGame(ed))).toEqual(["e4", "c5", "Nf3"]);
+  });
+
+  it("replaceMove swaps a move and keeps a still-legal continuation", () => {
+    const ed = gameFromPgn("1. e4 e5 2. Nf3");
+    expect(replaceMove(ed, ["e4", "e5", "Nf3"], "Nc3")).toBe(true);
+    expect(mainlineSans(projectGame(ed))).toEqual(["e4", "e5", "Nc3"]);
+  });
+
+  it("replaceMove truncates a continuation the change makes illegal", () => {
+    const ed = gameFromPgn("1. e4 d5 2. exd5");
+    expect(replaceMove(ed, ["e4", "d5"], "d6")).toBe(true);
+    expect(mainlineSans(projectGame(ed))).toEqual(["e4", "d6"]); // exd5 no longer legal
+  });
+
+  it("replaceMove keeps the move's own variations", () => {
+    const ed = gameFromPgn("1. e4 e5 (1... c5) 2. Nf3");
+    expect(replaceMove(ed, ["e4", "e5"], "e6")).toBe(true);
+    const root = projectGame(ed);
+    expect(mainlineSans(root)).toEqual(["e4", "e6", "Nf3"]);
+    expect(root.next!.next!.variationHeads.map((v) => v.san)).toEqual(["c5"]);
   });
 });

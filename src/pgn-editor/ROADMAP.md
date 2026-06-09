@@ -18,21 +18,27 @@ and where each piece stands.
 | **Game**         | `parse()` ✓ / empty ◐     | AST / `serialize()` ✓     | (container of headers+moves) ✓  | drop the object ✓          |
 | **Multi-game**   | `parseGames()` —          | iterate collection —      | add / reorder a game —          | remove a game —            |
 | **Headers**      | set key ◐ (raw)           | `headers[k]` ✓            | typed/validated setters —       | delete key ◐ (raw)         |
-| **Moves (tree)** | `addMoveAt()` ✓           | `projectGame()` / walk ✓  | comment / NAG / promote —        | `removeAt()` ✓             |
+| **Moves (tree)** | `addMoveAt()` ✓           | `projectGame()` / walk ✓  | comment / NAG / promote / replace ✓ | `removeAt()` ✓          |
 
 ✓ done · ◐ works via raw object/ctor but no first-class API · — not built
 
-## Tier 1 — Move-level Update (the one real gap; do next)
-What an editor actually needs and what users would feel missing. All FEN-neutral
-(pure tree mutation), so they belong **in pgn-editor** and are exposed through
-`core/game.ts`'s `GameEditor` seam:
-- `setComment(path, position, text)` — set/clear `commentMove` | `commentBefore` |
-  `commentAfter` on a node.
-- `setNags(path, nags)` — replace a node's NAG list (annotate `!`, `?`, `±`, …).
-- `promoteVariation(path)` — make a variation the mainline (was dropped from the
-  old engine; rebuild it correctly, incl. the 3+-sibling re-nesting edge).
-- `replaceMove(path, san)` — the only Update needing chess.js validation; stays
-  on the engine-aware side in `core/game.ts`.
+## Tier 1 — Move-level Update ✅ DONE
+Structural ops live in `pgn-editor/edit.ts` (FEN-neutral, with the shared tree
+traversal `childrenOf`/`resolvePath`/`nodeAt`); exposed through `core/game.ts`'s
+`GameEditor` seam:
+- `setComment(path, field, text)` ✓ — set/clear `commentMove` | `commentBefore` |
+  `commentAfter`.
+- `setNags(path, nags)` ✓ — replace a node's NAG list.
+- `promoteVariation(path)` ✓ — promote a variation head to mainline; old mainline +
+  all sibling variations re-home onto the new head (handles the 3+-sibling edge).
+- `replaceMove(path, san)` ✓ — engine-aware (in `core/game.ts`); validates the new
+  SAN, keeps the move's own variations, and truncates the continuation at the first
+  move the change makes illegal.
+
+**Known limitation (small follow-up):** only `commentAfter` survives write-back —
+`gameToPgn` serializes the projected `MoveNode` (single comment slot), so
+`commentMove`/`commentBefore` persist in the AST but aren't re-emitted. Switching
+`gameToPgn` to pgn-editor's `serialize()` (full comment fidelity) closes this.
 
 ## Tier 2 — Multi-game (removes the last GPL dependency)
 Today multi-game blocks fall back to read-only on `@mliebelt/pgn-parser`
