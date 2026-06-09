@@ -290,6 +290,21 @@ describe("PgnViewer (state-machine)", () => {
       expect(last.root.next!.comment).toBe("best by test");
     });
 
+    it("setCommentOn(before) sets the before-move comment and emits move", () => {
+      const editor = gameFromPgn("1. e4 e5");
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      viewer.setCommentOn(root.next!, "before e4", "before");
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.commentBefore).toBe("before e4");
+      expect(last.root.next!.comment).toBeUndefined(); // after-slot untouched
+    });
+
     it("setNagOn annotates a move and emits move", () => {
       const editor = gameFromPgn("1. e4 e5");
       const root = projectGame(editor);

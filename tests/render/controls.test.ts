@@ -409,6 +409,30 @@ describe("buildMoveListHtml", () => {
       expect(buildMoveListHtml(r, r.id)).not.toContain("chess-comment");
     });
 
+    it("renders a before-move comment ahead of the move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w" },
+        { san: "e5", moveNumber: 1, color: "b", commentBefore: "Black replies" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = buildMoveListHtml(r, r.id);
+      // The comment span precedes the e5 move token.
+      const commentPos = html.indexOf("Black replies");
+      const e5Pos = html.indexOf(">e5<");
+      expect(commentPos).toBeGreaterThan(-1);
+      expect(commentPos).toBeLessThan(e5Pos);
+    });
+
+    it("re-shows the move number after a before-move comment on a black move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w" },
+        { san: "e5", moveNumber: 1, color: "b", commentBefore: "hmm" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = buildMoveListHtml(r, r.id);
+      expect(html).toContain("1…"); // black-to-move marker re-shown after the comment
+    });
+
     it("renders comment after NAGs when both are present", () => {
       const moves: PgnMove[] = [
         { san: "e4", moveNumber: 1, color: "w", nags: [1], comment: "Strong move" },

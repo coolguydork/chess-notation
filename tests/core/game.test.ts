@@ -195,6 +195,11 @@ describe("gameToPgn", () => {
     expect(reparsed[0].commentBefore).toBe("hmm");
     expect(reparsed[0].commentAfter).toBe("ok");
   });
+
+  it("projects a before-move comment (commentMove) onto the MoveNode", () => {
+    const ed = gameFromPgn("{ intro } 1. e4 e5");
+    expect(projectGame(ed).next!.commentBefore).toBe("intro");
+  });
 });
 
 describe("move-level Update (Tier 1 seam)", () => {

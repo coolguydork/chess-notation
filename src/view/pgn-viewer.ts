@@ -324,10 +324,13 @@ export class PgnViewer {
     this.refreshAfterEdit();
   }
 
-  // Set/clear the after-move comment on `node` (empty string clears).
-  setCommentOn(node: MoveNode, text: string): void {
+  // Set/clear a comment on `node` (empty string clears). `where` selects the
+  // render position: "after" the move (default) or "before" it. These map to the
+  // AST's commentAfter / commentMove slots.
+  setCommentOn(node: MoveNode, text: string, where: "before" | "after" = "after"): void {
     if (!this.editor) return;
-    setComment(this.editor, nodeToPath(node), "commentAfter", text);
+    const field = where === "before" ? "commentMove" : "commentAfter";
+    setComment(this.editor, nodeToPath(node), field, text);
     this.refreshAfterEdit();
   }
 
