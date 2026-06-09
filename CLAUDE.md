@@ -12,11 +12,13 @@ Nothing in a lower layer may import from a layer above it.
 
 ```
 src/
+  pgn-editor/ — self-contained PGN parse/serialize + FEN-neutral AST; imports nothing else
   core/     — pure chess logic, no UI, no Obsidian
   render/   — board rendering (SVG) and controls (HTML), no Obsidian
   view/     — DOM-aware interaction logic, no Obsidian
   plugin/   — Obsidian glue; wires core + render + view into the plugin lifecycle
 tests/
+  pgn-editor/
   core/
   render/
   view/
@@ -25,10 +27,12 @@ tests/
 
 Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer) belongs in `view/`, not `plugin/`.
 
+`pgn-editor/` is a leaf: `core/` may import it, it imports nothing (no `core/`/render/view/plugin/Obsidian/DOM — enforced by `tests/pgn-editor/boundary.test.ts`). It's a clean-room, MIT, variation-aware PGN parsing/serializing core, kept liftable into its own package.
+
 ### `core/` — Chess logic
 - Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN parse via `@mliebelt/pgn-parser` + `serializeMoveTree`), `moves.ts` / `legal.ts` (move application + legal moves, delegated to `chess.js` via `chessjs-bridge.ts`), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
-- `game.ts` — `GameEditor`: cm-chess owns the **editable** game (load, add/remove moves, serialize). All PGN *edits* go through it; it projects to a read-only `MoveNode` tree for rendering. Plain holder + functions, no class (core/ convention).
-- No DOM, no Obsidian, no side effects. Functions are pure except `GameEditor`'s edit ops, which mutate their cm-chess instance in place.
+- `game.ts` — `GameEditor`: owns the **editable** game as a `pgn-editor` AST (load, add/remove moves, serialize), with `chess.js` as the sole rules engine for validation/numbering. All PGN *edits* go through it; it projects to a read-only `MoveNode` tree for rendering. Plain holder + functions, no class (core/ convention).
+- No DOM, no Obsidian, no side effects. Functions are pure except `GameEditor`'s edit ops, which mutate the AST in place.
 
 ### `render/` — Board rendering
 - Produces SVG from a `core/` board-state value object + a config (colors, theme, orientation, highlights).
@@ -126,7 +130,7 @@ theme is a one-line entry in that record.
 | `js-yaml` for the chess block body | Human-readable, extensible without breaking old blocks; a battle-tested parser instead of a hand-rolled one (library-first) |
 | SVG rendering (not canvas) | SVG is accessible, scalable, and inspectable in devtools |
 | Rules engine via `chess.js` (`core/legal.ts`, `moves.ts` delegate through `chessjs-bridge.ts`) | Library-first; `chess.js 1.x` owns legal moves / application / check detection. `fen.ts` stays homemade (it doubles as the BoardState ↔ FEN conversion primitive). |
-| PGN **edits** via `cm-chess` (`core/game.ts`) | Editing (add/remove moves, variation branching) rides on a battle-tested library instead of homemade tree mutation. cm-chess owns the editable game; we project to `MoveNode` for rendering and serialize via `serializeMoveTree` (cm-pgn's `render()` mis-emits NAGs / SetUp-FEN numbers). cm-pgn pulls in a second engine (`chess.mjs`); accepted. Multi-game + null-move games stay read-only on the `@mliebelt` path. |
+| PGN **edits** via our own `pgn-editor` core (`core/game.ts`) | No well-written MIT edit-capable PGN library exists (kokopu=LGPL-3.0; chessops & @mliebelt=GPL-3.0; cm-chess/cm-pgn=MIT but middling — buggy `undo`, no promote, render bugs) — filling that gap is the *stated reason* the library-first rule allows building. Clean-room parser/serializer + FEN-neutral AST; `GameEditor` owns the AST and validates via `chess.js` (one rules engine again — the old `chess.mjs` dual engine is gone), projects to `MoveNode`, and serializes via `serializeMoveTree`. Multi-game stays read-only on the `@mliebelt` path; a single game we can't parse (strict mode throws) also falls back to read-only. |
 | Four-layer architecture (`core → render → view → plugin`) | Enforces separation so phases don't require refactoring layer boundaries |
 | Piece assets default to bundled | Obsidian is local-first; offline must always work without configuration |
 | Pointer events for interaction | Single handler works for both mouse and touch; no separate touch wiring |
@@ -170,7 +174,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (314 tests across 10 suites)
+npm test           # vitest unit tests (339 tests across 15 suites)
 npm run dev        # watch mode
 ```
 
