@@ -6,10 +6,6 @@ const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 
 mkdirSync("dist", { recursive: true });
 
-// Stockfish engine — separate worker files, not bundled.
-copyFileSync("node_modules/stockfish/bin/stockfish-18-lite-single.js", "dist/stockfish-18-lite-single.js");
-copyFileSync("node_modules/stockfish/bin/stockfish-18-lite-single.wasm", "dist/stockfish-18-lite-single.wasm");
-
 // cm-chessboard SVG sprites — loaded at runtime via assetsUrl (resolved to an
 // Obsidian resource path in plugin/). Copy only the sprites, mirroring the
 // package's assets/ layout so the default sprite paths resolve.

@@ -100,7 +100,7 @@ theme is a one-line entry in that record.
 ### Phase 5 — Engine integration 🚧
 - **Analysis mode ✅** — send the position to Stockfish; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
 - **Engine play mode** (human vs. engine, validated via `core/` rules) — not yet built; reuse `commitMove`.
-- **Stockfish delivery — both supported:** WASM (bundled; offline, zero setup; larger bundle) and an external binary (small bundle, full strength, user-installed). The external-binary path is UCI-generic; the WASM path is Stockfish-specific by design.
+- **Stockfish delivery — external binary only:** a user-installed UCI engine, auto-discovered from common install paths or set explicitly in settings. UCI-generic and desktop-only. A bundled WASM engine was supported until 2026-06, then removed entirely (weaker, slower, and bloated the bundle); analysis on mobile is unsupported as a result.
 
 ---
 

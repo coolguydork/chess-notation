@@ -29,7 +29,6 @@ interface ChessPluginSettings {
   defaultTheme: string;
   squareSize: number;
   showCoordinates: boolean;
-  engineMode: "auto" | "external" | "wasm";
   enginePath: string;                      // explicit binary path; empty = auto-discover
   engineDepth: number;
   engineMultiPV: number;
@@ -42,7 +41,6 @@ const DEFAULT_SETTINGS: ChessPluginSettings = {
   defaultTheme: "classic",
   squareSize: 60,
   showCoordinates: true,
-  engineMode: "auto",
   enginePath: "",
   engineDepth: 18,
   engineMultiPV: 3,
@@ -573,24 +571,9 @@ class ChessSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Engine" });
 
     new Setting(containerEl)
-      .setName("Engine mode")
-      .setDesc("Auto uses the external binary on desktop (strongest) and the built-in WASM engine on mobile. " +
-               "WASM runs on all devices but is weaker and slower than a native Stockfish install. " +
-               "External binary is desktop-only (install via Homebrew, apt, etc.).")
-      .addDropdown((drop) => {
-        drop.addOption("auto", "Auto (recommended)");
-        drop.addOption("external", "External binary (desktop only)");
-        drop.addOption("wasm", "WASM — built-in, weaker");
-        drop.setValue(this.plugin.settings.engineMode);
-        drop.onChange(async (value) => {
-          this.plugin.settings.engineMode = value as "auto" | "external" | "wasm";
-          await this.plugin.saveSettings();
-        });
-      });
-
-    new Setting(containerEl)
       .setName("Engine binary path")
-      .setDesc("Absolute path to a UCI-compatible engine executable. Leave blank to auto-discover.")
+      .setDesc("Absolute path to a UCI-compatible engine executable (e.g. Stockfish via Homebrew or apt; desktop only). " +
+               "Leave blank to auto-discover from common install locations.")
       .addText((text) => {
         text
           .setPlaceholder("/opt/homebrew/bin/stockfish")
@@ -731,20 +714,12 @@ export default class ChessPlugin extends Plugin {
     const optionsKey = JSON.stringify(this.settings.engineUserOptions);
     if (
       !this.engineWorker ||
-      this.engineWorker.mode !== this.settings.engineMode ||
       this.engineWorker.path !== this.settings.enginePath ||
       this.engineWorker.userOptionsKey !== optionsKey
     ) {
       this.engineWorker?.dispose();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const adapter = (this.app.vault.adapter as any);
-      const pluginDir = adapter.getBasePath
-        ? `${adapter.getBasePath()}/.obsidian/plugins/${this.manifest.id}`
-        : "";
       this.engineWorker = new EngineWorker({
-        mode: this.settings.engineMode,
         externalPath: this.settings.enginePath || undefined,
-        wasmDir: pluginDir,
         depth: this.settings.engineDepth,
         multiPV: this.settings.engineMultiPV,
         userOptions: this.settings.engineUserOptions,
