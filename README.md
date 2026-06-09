@@ -1,6 +1,6 @@
 # Chess for Obsidian
 
-Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, click pieces to make moves, analyze positions with Stockfish, and choose from six board themes — all without leaving Obsidian.
+Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, edit them by playing moves on the board, annotate with comments and glyphs, analyze positions with Stockfish, and choose from six board themes — all without leaving Obsidian.
 
 ---
 
@@ -9,12 +9,13 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 | Feature | Summary |
 |---|---|
 | **FEN boards** | Paste any FEN string to render an interactive board. Click a piece to see its legal moves highlighted; click a destination to play the move. |
-| **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons or by clicking any move token in the move list. |
+| **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons, **arrow keys**, or by clicking any move token. Variations, comments, NAG glyphs, and header tags are all displayed. |
+| **Edit games in place** | Play a move on the board to extend the line or branch a variation. Right-click any move to add comments, annotation glyphs (`!`, `?`, `!!`…), delete from that point, or promote a variation to the main line. Edits are **written back to the note**. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
-| **Engine analysis** | Add `analysis: true` to any FEN block for a Stockfish-powered Analyze button. Colored arrows show the top moves; a score list shows evaluations and principal variations. |
+| **Engine analysis** | A Stockfish-powered analysis panel (shown by default). Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
-| **Board orientation** | Flip any board to Black's perspective with `orientation: black`. |
+| **Board orientation** | Flip any board to Black's perspective with `orientation: black`, or with the flip (⇆) button. |
 | **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
 
 ---
@@ -29,6 +30,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
   - [Combined FEN + PGN](#combined-fen--pgn)
   - [Analysis blocks](#analysis-blocks)
   - [User-drawn arrows](#user-drawn-arrows)
+- [Editing & annotating games](#editing--annotating-games)
 - [Board themes](#board-themes)
 - [Engine analysis](#engine-analysis)
   - [Installing Stockfish](#installing-stockfish)
@@ -131,7 +133,7 @@ theme: green
 pgn: <PGN string>
 ```
 
-Renders a game viewer with previous/next navigation buttons and a clickable move list. Click any move token to jump directly to that position.
+Renders a game viewer with previous/next navigation buttons and a clickable move list. Click any move token to jump directly to that position, use the ← / → arrow keys, or play a move on the board to edit the game (see [Editing & annotating games](#editing--annotating-games)).
 
 **Options:**
 
@@ -140,14 +142,17 @@ Renders a game viewer with previous/next navigation buttons and a clickable move
 | `pgn` | string | — | PGN string (required if no `fen`) |
 | `orientation` | `white` \| `black` | `white` | Board orientation |
 | `theme` | string | plugin setting | Board color theme |
+| `analysis` | boolean | `true` | Show the Stockfish analysis panel (set `false` to hide) |
 
-The PGN parser handles:
+The PGN parser and viewer handle:
 - Standard algebraic notation for all piece moves, captures, castling, en passant, and promotion
-- Move comments (`{ comment text }`)
-- Numeric annotation glyphs (`$1`, `$2`, …)
-- Variations (parsed but not yet displayed in the viewer)
+- Move comments (`{ comment text }`), shown inline in the move list
+- Numeric annotation glyphs (`$1`, `$2`, …), rendered as symbols (`!`, `?`, `!!`, …)
+- Variations (`(…)`), displayed as indented branches you can click into
 - Standard result tokens: `1-0`, `0-1`, `1/2-1/2`, `*`
-- Header tags (`[Event "..."]`, `[White "..."]`, etc.) — parsed but not displayed
+- Header tags (`[Event "..."]`, `[White "..."]`, etc.), shown in a strip above the board
+
+A single game is fully editable; a multi-game PGN is shown read-only with a game selector.
 
 **Example — Immortal Game:**
 
@@ -180,12 +185,12 @@ pgn: 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 
 ### Analysis blocks
 
-Add `analysis: true` to any FEN block to attach an **Analyze** button below the board.
+The Stockfish analysis panel is shown **by default** on every block — there's nothing to add. To hide it, set `analysis: false`.
 
 ````markdown
 ```chess
 fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-analysis: true
+analysis: false
 ```
 ````
 
@@ -198,6 +203,8 @@ When you click **Analyze**:
    - **Blue arrow** — second-best move (line 2)
    - **Orange arrow** — third-best move (line 3)
 4. Each arrow has a score and the first five moves of the principal variation
+
+In an editable PGN game, clicking a move in a principal variation grafts that line into the game as a variation from the current position.
 
 See [Engine analysis](#engine-analysis) for setup instructions.
 
@@ -224,6 +231,38 @@ fen: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
 Open the note, right-click-drag from **f3** to **e5** to draw a "knight attacks" arrow, then type `Knight fork threat` as the comment.
 
 Arrows are in-memory — they reset when the note is closed. Engine analysis arrows and user arrows coexist independently.
+
+---
+
+## Editing & annotating games
+
+A single-game PGN block (or a FEN block) is a live editor, not just a viewer. Every change is **written back into the `chess` block in your note**, so your edits persist.
+
+### Playing moves
+
+Play a legal move on the board — drag a piece or click origin then destination. If you're at the end of the line, the move extends it; if a continuation already exists, your move is added as a **variation** (branch) from that position. Illegal moves are rejected.
+
+### Annotating moves
+
+**Right-click any move** in the move list for a context menu:
+
+| Action | Effect |
+|---|---|
+| **Comment before / after move…** | Open a text box to attach a `{ comment }` before or after the move |
+| **Annotate `!` `?` `!!` `??` `!?` `?!`** | Tag the move with a NAG glyph (`$1`–`$6`); shown as the symbol in the move list |
+| **Clear annotation** | Remove the move's glyph |
+| **Promote to main line** | (On a variation move) make this branch the main line at its branch point |
+| **Delete from here** | Remove this move and everything after it in its line |
+
+**Right-click an existing comment** to edit or delete it. Click a comment to jump to its move, the same as clicking the move itself.
+
+### Headers
+
+Header tags (`[White "..."]`, `[Event "..."]`, …) in the PGN are shown in a strip above the board and are preserved when the game is edited and written back.
+
+### What stays read-only
+
+A **multi-game** PGN is displayed read-only with a dropdown to switch games. A single game the parser can't read strictly also falls back to a read-only render rather than risk corrupting it on write-back.
 
 ---
 
@@ -352,6 +391,7 @@ See [Plugin settings](#plugin-settings) above.
 - **Right-click drag** from one square to another to draw an annotation arrow.
 - **Right-click drag** the same arrow again to remove it.
 - In the PGN viewer, **click any move token** in the move list to jump to that position.
+- **← / → arrow keys** step backward/forward through the current line once the board has focus (click or tab to it). The keys are scoped to the focused board, so multiple games on one page don't interfere; a focus ring shows which board is active.
 - The prev/next buttons have a minimum tap target of 44 × 36 px for comfortable mobile use.
 - The board uses pointer events, so mouse and touch are handled by the same code path with no 300 ms tap delay.
 - On narrow screens (< 480 px) the board fills the available width automatically.
@@ -374,7 +414,7 @@ npm install
 |---|---|
 | `npm run build` | Type-check + production bundle → `dist/main.js` + `dist/styles.css` |
 | `npm run dev` | Watch mode (rebuilds on save, skips type-check) |
-| `npm test` | Run all 210 tests with Vitest |
+| `npm test` | Run all 400 tests with Vitest |
 
 **Deploy to the test vault:**
 
@@ -397,44 +437,62 @@ node scripts/probe-engine.mjs "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NP1/PPP1NPBP
 
 ## Architecture overview
 
-The codebase is split into three layers. **Dependencies only flow downward** — nothing in a lower layer imports from a layer above.
+The codebase is split into four layers plus a self-contained PGN core. **Dependencies only flow downward** — nothing in a lower layer imports from a layer above.
 
 ```
 src/
-  core/     — pure chess logic, zero dependencies (no Obsidian, no DOM)
-  render/   — SVG board renderer and PGN viewer controls
-  plugin/   — Obsidian glue: lifecycle, settings, block processor, engine worker
+  pgn-editor/ — clean-room PGN parse/serialize/edit + FEN-neutral AST; imports nothing else
+  core/       — pure chess logic, no UI, no Obsidian (may import pgn-editor)
+  render/     — board theming + PGN viewer HTML, no Obsidian, no DOM events
+  view/       — DOM-aware interaction (board mount, the PGN viewer/editor)
+  plugin/     — Obsidian glue: lifecycle, settings, block processor, engine worker
 ```
+
+Rules are delegated to [chess.js](https://github.com/jhlywa/chess.js); the board is rendered by [cm-chessboard](https://github.com/shaack/cm-chessboard); the chess-block body is parsed with [js-yaml](https://github.com/nodeca/js-yaml). The library-first rule keeps the homemade surface small — the one deliberate exception is `pgn-editor`, because no suitably-licensed edit-capable PGN library exists.
+
+### `pgn-editor/`
+
+A leaf package (MIT, liftable) that imports nothing from the rest of the app. Clean-room, variation-aware PGN parsing and serializing over a FEN-neutral AST, plus structural edits (set comment / set NAGs / remove / promote variation). `core/game.ts` builds on it.
 
 ### `core/`
 
 | File | Responsibility |
 |---|---|
-| `types.ts` | `BoardState`, `Piece`, `PgnGame`, and related types |
+| `types.ts` | `BoardState`, `Piece`, `MoveNode`, `PgnGame`, and related types |
 | `fen.ts` | FEN string → `BoardState` (`parseFEN`) and reverse (`serializeFEN`) |
-| `pgn.ts` | PGN string → `PgnGame` with moves, comments, NAGs, and result |
-| `moves.ts` | Apply a SAN move string to a `BoardState`, returning a new state |
-| `legal.ts` | Generate all legal moves for a position, including castling, en passant, and pin/check filtering |
+| `pgn.ts` | Adapt the `pgn-editor` AST to `PgnGame` (single + multi-game); `serializeMoveTree` |
+| `moves.ts` / `legal.ts` | Apply a SAN move / generate legal moves — delegated to chess.js via `chessjs-bridge.ts` |
+| `tree.ts` | Build and navigate the read-only `MoveNode` tree the viewer renders |
+| `game.ts` | `GameEditor`: owns the editable game as a `pgn-editor` AST; add/remove/edit moves, project to `MoveNode`, serialize back to PGN |
 | `engine.ts` | UCI protocol helpers: `positionToUci`, `parseInfoLine`, `parseBestMove`, `scoreToString` |
 
-Every function in `core/` is pure: same inputs always produce the same output, no side effects. All 210 tests run in < 250 ms.
+`core/` has no DOM and no Obsidian imports; functions are pure except `GameEditor`'s edit ops, which mutate the AST in place.
 
 ### `render/`
 
 | File | Responsibility |
 |---|---|
-| `config.ts` | `BoardConfig`, `BoardColors`, theme definitions, `EngineArrow`, `UserArrow` |
-| `board.ts` | Render a `BoardState` to an SVG string; overlays for selected square, legal move dots, engine arrows, and user-drawn arrows with optional labels |
-| `controls.ts` | Build position snapshots from a PGN move list; render the full PGN viewer HTML |
+| `config.ts` | `BoardConfig`, `BoardColors`, the six theme definitions, `EngineArrow`, piece-source resolution |
+| `controls.ts` | Build the PGN viewer / move-list HTML from a `MoveNode` tree |
+| `pieces/` | Bundled SVG piece set |
 
-No Obsidian imports. Can be used in any browser or test environment.
+No Obsidian imports — usable in any browser or test environment.
+
+### `view/`
+
+| File | Responsibility |
+|---|---|
+| `cm-board.ts` | Mount and drive a cm-chessboard instance (pieces, highlights, arrows, move/animation) |
+| `board-handle.ts` | The `InteractiveBoardHandle` interface the viewer talks to (lets tests stub the board) |
+| `pgn-viewer.ts` | `PgnViewer`: owns viewer state, navigation, keyboard handling, and routes edits through `GameEditor` |
 
 ### `plugin/`
 
 | File | Responsibility |
 |---|---|
-| `main.ts` | Plugin entry point: registers the `chess` code block processor, owns settings and the settings tab, mounts interactive boards and analysis panels |
-| `engine-worker.ts` | `EngineWorker` class: spawns Stockfish via `child_process`, manages the UCI handshake, resolves with `AnalysisResult`; pure helpers `buildUciCommands` and `collectAnalysis` are exported for testing |
+| `main.ts` | Plugin entry point: registers the `chess` block processor, owns settings + the settings tab, mounts the viewer and analysis panel, raises edit context menus, writes edits back to the note |
+| `engine-worker.ts` | `EngineWorker`: spawns Stockfish via `child_process`, manages the UCI handshake, resolves with `AnalysisResult`; pure helpers `buildUciCommands` / `collectAnalysis` are exported for testing |
+| `yaml-block.ts` | Parse the chess-block YAML into block params; serialize edits back to a YAML-safe `pgn:` scalar |
 | `styles.css` | Scoped CSS for boards, PGN viewer, and analysis panel |
 
 ### Data flow for a `chess` block
@@ -442,12 +500,11 @@ No Obsidian imports. Can be used in any browser or test environment.
 ```
 Markdown note
   └─ plugin/main.ts (code block processor)
-       ├─ js-yaml: parse YAML → block params
-       ├─ core/fen.ts: FEN string → BoardState
-       ├─ core/pgn.ts: PGN string → PgnGame
-       ├─ render/controls.ts: PgnGame → snapshots[]
-       ├─ render/board.ts: BoardState + config → SVG string
-       ├─ core/legal.ts: BoardState → legal moves (for click-to-move)
+       ├─ plugin/yaml-block.ts: parse YAML → block params
+       ├─ core/game.ts (GameEditor): PGN/FEN → editable AST → MoveNode tree
+       ├─ render/controls.ts: MoveNode tree → move-list HTML
+       ├─ view/pgn-viewer.ts + view/cm-board.ts: mount the interactive board
+       ├─ edits → GameEditor mutate → re-serialize → write back to the note
        └─ plugin/engine-worker.ts: BoardState → AnalysisResult (on demand)
 ```
 
