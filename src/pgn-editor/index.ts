@@ -9,6 +9,7 @@
 
 export type { Color, PgnNode, PgnGameAst } from "./types";
 export { parse } from "./parser";
+export { parseGames, hasTopLevelResult } from "./parseGames";
 export { serialize, serializeMovetext } from "./serialize";
 
 // Structural tree navigation + FEN-neutral edits (move-level Update/Delete).
@@ -23,7 +24,7 @@ export {
   promoteVariation,
 } from "./edit";
 
-// TODO(pgn-editor): remaining PGN-CRUD surface — see ./ROADMAP.md. Next is
-// multi-game parse (parseGames, to retire the @mliebelt GPL dep), then header
-// CRUD if a consumer needs it. Export each here as it lands; keep this barrel
-// the single public API contract.
+// TODO(pgn-editor): remaining PGN-CRUD surface — see ./ROADMAP.md. Game-collection
+// C/U/D (append/remove/reorder a game) and header CRUD are deferred until a
+// consumer needs them. Export each here as it lands; keep this barrel the single
+// public API contract.

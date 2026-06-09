@@ -11,8 +11,8 @@ import type { PgnNode, CommentField } from "../pgn-editor";
 import { parseFEN } from "./fen";
 import { applyMoveEx } from "./moves";
 import { buildMoveTree } from "./tree";
-import { serializeMoveTree, cleanComment } from "./pgn";
-import type { MoveNode, PgnMove, BoardState } from "./types";
+import { serializeMoveTree, astToPgnMoves } from "./pgn";
+import type { MoveNode, BoardState } from "./types";
 
 // ---------------------------------------------------------------------------
 // GameEditor — our own FEN-neutral PGN tree is the editable game.
@@ -64,20 +64,6 @@ export function projectGame(editor: GameEditor): MoveNode {
 // Serialize via our serializer over the projection (movetext + result).
 export function gameToPgn(editor: GameEditor, result: string): string {
   return serializeMoveTree(projectGame(editor), result);
-}
-
-// Adapter: pgn-editor AST node -> core PgnMove. (core may depend on pgn-editor;
-// never the reverse.) Mirrors the @mliebelt path: comment from the after-move
-// comment via cleanComment, NAGs, and recursive variations.
-function astToPgnMoves(nodes: PgnNode[]): PgnMove[] {
-  return nodes.map((n) => {
-    const move: PgnMove = { san: n.san, moveNumber: n.moveNumber, color: n.color };
-    const comment = n.commentAfter ? cleanComment(n.commentAfter) : "";
-    if (comment) move.comment = comment;
-    if (n.nags.length) move.nags = n.nags;
-    if (n.variations.length) move.variations = n.variations.map(astToPgnMoves);
-    return move;
-  });
 }
 
 // ---------------------------------------------------------------------------

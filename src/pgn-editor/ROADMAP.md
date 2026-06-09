@@ -16,7 +16,7 @@ and where each piece stands.
 | Layer            | Create                    | Read                      | Update                          | Delete                     |
 |------------------|---------------------------|---------------------------|---------------------------------|----------------------------|
 | **Game**         | `parse()` ✓ / empty ◐     | AST / `serialize()` ✓     | (container of headers+moves) ✓  | drop the object ✓          |
-| **Multi-game**   | `parseGames()` —          | iterate collection —      | add / reorder a game —          | remove a game —            |
+| **Multi-game**   | `parseGames()` ✓          | iterate collection ✓      | add / reorder a game —          | remove a game —            |
 | **Headers**      | set key ◐ (raw)           | `headers[k]` ✓            | typed/validated setters —       | delete key ◐ (raw)         |
 | **Moves (tree)** | `addMoveAt()` ✓           | `projectGame()` / walk ✓  | comment / NAG / promote / replace ✓ | `removeAt()` ✓          |
 
@@ -40,13 +40,15 @@ traversal `childrenOf`/`resolvePath`/`nodeAt`); exposed through `core/game.ts`'s
 `commentMove`/`commentBefore` persist in the AST but aren't re-emitted. Switching
 `gameToPgn` to pgn-editor's `serialize()` (full comment fidelity) closes this.
 
-## Tier 2 — Multi-game (removes the last GPL dependency)
-Today multi-game blocks fall back to read-only on `@mliebelt/pgn-parser`
-(GPL-3.0). Closing this drops that dep entirely:
-- `parseGames(text): PgnGameAst[]` — split a multi-game PGN (header-block
-  boundaries) and parse each with the existing single-game parser.
-- Collection helpers: append / remove / reorder a game; serialize all.
-- Then retire `@mliebelt` from `core/pgn.ts` and the `game.test` oracle.
+## Tier 2 — Multi-game ✅ DONE (last GPL dependency removed)
+- `parseGames(text): PgnGameAst[]` ✓ in `parseGames.ts` — a comment/variation-aware
+  top-level scanner splits on result tokens and header-block boundaries (throws when
+  a header interrupts un-terminated movetext); each chunk goes through `parse()`.
+- `core/pgn.ts` reimplemented over pgn-editor (`parsePGN`/`parseMultiPGN` adapt the
+  AST to `PgnGame`); `@mliebelt/pgn-parser` (GPL-3.0) **removed** along with its
+  null-literal hack. Single parsing stack now, no GPL dep.
+- **Deferred** (no consumer yet): game-collection C/U/D — append/remove/reorder are
+  plain array ops on `PgnGameAst[]`; add when something needs them.
 
 ## Tier 3 — Header/field CRUD + validation (only if a consumer needs it)
 Pure "spreadsheet" CRUD on tags. Low value for the plugin (its blocks carry

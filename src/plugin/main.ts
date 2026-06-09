@@ -702,8 +702,8 @@ export default class ChessPlugin extends Plugin {
           let gameIndex = 0;
 
           // Single game → the AST editor owns it (editable). Multi-game stays
-          // read-only on the @mliebelt path. A single game we can't parse
-          // (malformed movetext) also falls back to read-only.
+          // read-only. A single game we can't parse (malformed movetext) also
+          // falls back to read-only.
           let editor: GameEditor | undefined;
           let root: MoveNode;
           if (games.length === 1) {

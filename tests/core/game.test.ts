@@ -37,7 +37,8 @@ function expectTreesEqual(a: MoveNode | null, b: MoveNode | null, path = "root")
   expectTreesEqual(a.next, b.next, `${path}>${a.san}`);
 }
 
-// Build the reference tree via the existing (tested) @mliebelt + buildMoveTree path.
+// Build the same tree via the other entry path (parseMultiPGN -> buildMoveTree),
+// a cross-path consistency check that gameFromPgn -> projectGame agrees with it.
 function viaLib(movetext: string, startFen = START_FEN): MoveNode {
   return buildMoveTree(startFen, parseMultiPGN(`${movetext} *`)[0].moves);
 }
@@ -167,9 +168,8 @@ describe("gameToPgn", () => {
     );
   });
 
-  it("uses correct move numbers from a SetUp FEN (not cm-pgn's buggy render)", () => {
+  it("uses correct move numbers from a SetUp FEN", () => {
     const fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
-    // cm-pgn's own render() would emit "1. Bb5 ..."; ours respects the FEN.
     expect(gameToPgn(gameFromPgn("3. Bb5 a6", fen), "*")).toBe("3. Bb5 a6 *");
   });
 });
