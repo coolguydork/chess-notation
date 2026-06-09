@@ -1,4 +1,4 @@
-import { buildMoveListHtml } from "../render/controls";
+import { buildMoveListHtml, buildHeaderHtml } from "../render/controls";
 import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
 import { addMoveAt, removeAt, projectGame, promoteVariation, setComment, setNags } from "../core/game";
 import type { GameEditor } from "../core/game";
@@ -18,6 +18,7 @@ interface PgnViewerState {
   root: MoveNode;
   current: MoveNode;
   result: string;
+  headers: Record<string, string>;
   engineArrows: EngineArrow[];
 }
 
@@ -40,6 +41,7 @@ export class PgnViewer {
   private navPrevEl!: HTMLButtonElement;
   private navNextEl!: HTMLButtonElement;
   private moveListEl!: HTMLElement;
+  private headersEl!: HTMLElement;
   private turnIndicatorEl!: HTMLElement;
   private board!: InteractiveBoardHandle;
   private hoveredId: number | null = null;
@@ -55,6 +57,8 @@ export class PgnViewer {
     private config: BoardConfig,
     current: MoveNode,
     result: string,
+    // PGN header tags for the game-info strip ({} for FEN-only blocks).
+    headers: Record<string, string> = {},
     // The editable game. When present, board moves and engine grafts are routed
     // through the AST editor; when absent the viewer is read-only (multi-game blocks).
     private editor?: GameEditor,
@@ -66,7 +70,7 @@ export class PgnViewer {
       onMove: (san: string, from: number, to: number, newState: BoardState) => void,
     ) => InteractiveBoardHandle,
   ) {
-    this.state = { root, current, result, engineArrows: [] };
+    this.state = { root, current, result, headers, engineArrows: [] };
   }
 
   mount(): void {
@@ -74,6 +78,11 @@ export class PgnViewer {
     const viewerDiv = document.createElement("div");
     viewerDiv.className = "chess-viewer";
     this.host.appendChild(viewerDiv);
+
+    // Game-info header strip (above the board; empty when there are no headers).
+    this.headersEl = document.createElement("div");
+    this.headersEl.className = "chess-headers-container";
+    viewerDiv.appendChild(this.headersEl);
 
     this.boardWrapperEl = document.createElement("div");
     this.boardWrapperEl.className = "chess-board-wrapper";
@@ -220,6 +229,7 @@ export class PgnViewer {
     const color = this.state.current.state.activeColor;
     this.turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
+    this.headersEl.innerHTML = buildHeaderHtml(this.state.headers);
     this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined);
     this.scrollActiveMoveIntoView();
   }
@@ -375,11 +385,11 @@ export class PgnViewer {
     this.board.endPreview();
   }
 
-  loadGame(root: MoveNode, result: string): void {
+  loadGame(root: MoveNode, result: string, headers: Record<string, string> = {}): void {
     this.board.endPreview();
     this.cancelAnim?.();
     this.cancelAnim = null;
-    this.state = { root, current: root, result, engineArrows: [] };
+    this.state = { root, current: root, result, headers, engineArrows: [] };
     this.board.setState(root.state);
     this.render();
     this.emit("load-game");

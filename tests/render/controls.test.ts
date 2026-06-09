@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMoveTree, findNodeById, buildMoveListHtml } from "../../src/render/controls";
+import { buildMoveTree, findNodeById, buildMoveListHtml, buildHeaderHtml } from "../../src/render/controls";
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
 import type { PgnMove, MoveNode } from "../../src/core/types";
@@ -481,5 +481,51 @@ describe("buildMoveListHtml delete control", () => {
   it("emits no delete buttons when not editable", () => {
     expect(buildMoveListHtml(root, e4.id, undefined, false)).not.toContain("data-delete-id");
     expect(buildMoveListHtml(root, e4.id)).not.toContain("data-delete-id"); // default
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildHeaderHtml — PGN game-info strip
+// ---------------------------------------------------------------------------
+
+describe("buildHeaderHtml", () => {
+  it("returns an empty string when there are no headers", () => {
+    expect(buildHeaderHtml({})).toBe("");
+  });
+
+  it("renders every tag as a key/value pair", () => {
+    const html = buildHeaderHtml({ White: "Kasparov", Black: "Karpov" });
+    expect(html).toContain("chess-headers");
+    expect(html).toContain(`<span class="chess-header-key">White</span>`);
+    expect(html).toContain(`<span class="chess-header-value">Kasparov</span>`);
+    expect(html).toContain(`<span class="chess-header-key">Black</span>`);
+    expect(html).toContain(`<span class="chess-header-value">Karpov</span>`);
+  });
+
+  it("shows ALL tags, including Result, FEN, and SetUp", () => {
+    const html = buildHeaderHtml({ Result: "1-0", FEN: "8/8/8/8/8/8/8/8 w - - 0 1", SetUp: "1" });
+    expect(html).toContain("Result");
+    expect(html).toContain("1-0");
+    expect(html).toContain("FEN");
+    expect(html).toContain("SetUp");
+  });
+
+  it("preserves source order", () => {
+    const html = buildHeaderHtml({ Event: "World Cup", Site: "Baku", Round: "3" });
+    expect(html.indexOf("World Cup")).toBeLessThan(html.indexOf("Baku"));
+    expect(html.indexOf("Baku")).toBeLessThan(html.indexOf("3"));
+  });
+
+  it("skips tags whose value is empty", () => {
+    const html = buildHeaderHtml({ Event: "Match", Annotator: "  " });
+    expect(html).toContain("Event");
+    expect(html).not.toContain("Annotator");
+  });
+
+  it("escapes HTML in keys and values", () => {
+    const html = buildHeaderHtml({ White: "<b>x</b>", Event: "a & b" });
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).toContain("a &amp; b");
+    expect(html).not.toContain("<b>x</b>");
   });
 });

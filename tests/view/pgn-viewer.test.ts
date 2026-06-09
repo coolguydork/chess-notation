@@ -42,6 +42,7 @@ function makeViewer(
   root: MoveNode,
   current: MoveNode,
   editor?: GameEditor,
+  headers: Record<string, string> = {},
 ): {
   viewer: PgnViewer;
   stub: InteractiveBoardHandle & { _onMove?: (san: string, from: number, to: number, newState: BoardState) => void };
@@ -79,7 +80,7 @@ function makeViewer(
   // We bypass mount() by directly setting private fields via a subclass trick.
   class TestableViewer extends PgnViewer {
     constructor() {
-      super(host, root, makeConfig(), current, "*", editor, factory);
+      super(host, root, makeConfig(), current, "*", headers, editor, factory);
     }
     // Expose mount logic without DOM — skip mount(), use internal boot instead
     boot(): void {
@@ -92,6 +93,7 @@ function makeViewer(
         addEventListener: vi.fn(),
         querySelector: () => null,
       };
+      (this as any).headersEl = { innerHTML: "" };
       (this as any).boardWrapperEl = {};
       // Call board factory
       const b = factory({} as HTMLElement, current.state, makeConfig(), undefined, (san, from, to, ns) => {
@@ -373,6 +375,19 @@ describe("PgnViewer (state-machine)", () => {
       viewer.loadGame(newRoot, "*");
 
       expect(events[0].current).toBe(newRoot);
+    });
+
+    it("repaints the header strip with the new game's headers", () => {
+      const root = buildMoveTree(STARTING_FEN, []);
+      const { viewer } = makeViewer(root, root, undefined, { White: "Kasparov", Black: "Karpov" });
+      const newRoot = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+
+      viewer.loadGame(newRoot, "1-0", { White: "Fischer", Black: "Spassky" });
+
+      const html = (viewer as unknown as { headersEl: { innerHTML: string } }).headersEl.innerHTML;
+      expect(html).toContain("Fischer");
+      expect(html).toContain("Spassky");
+      expect(html).not.toContain("Kasparov"); // old headers replaced
     });
   });
 

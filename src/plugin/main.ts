@@ -741,7 +741,7 @@ export default class ChessPlugin extends Plugin {
             const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
 
             const appRef = this.app;
-            const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", editor);
+            const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", {}, editor);
             viewer.mount();
 
             if (editor) {
@@ -839,12 +839,12 @@ export default class ChessPlugin extends Plugin {
             select.addEventListener("change", () => {
               gameIndex = parseInt(select.value, 10);
               const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
-              viewer.loadGame(newRoot, games[gameIndex].result);
+              viewer.loadGame(newRoot, games[gameIndex].result, games[gameIndex].headers);
             });
           }
 
           const app = this.app;
-          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, editor);
+          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, games[gameIndex].headers, editor);
           viewer.mount();
 
           if (editor) {
