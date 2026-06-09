@@ -36,6 +36,26 @@ function escapeHtml(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Header (game info) rendering
+// ---------------------------------------------------------------------------
+
+// Render every PGN tag as an aligned key/value grid, in source order. Each tag
+// emits two grid cells (key, value) styled by .chess-headers. Tags with an empty
+// value are skipped; returns "" when there is nothing to show (FEN-only blocks).
+export function buildHeaderHtml(headers: Record<string, string>): string {
+  const cells: string[] = [];
+  for (const [key, value] of Object.entries(headers)) {
+    if (value.trim() === "") continue;
+    cells.push(
+      `<span class="chess-header-key">${escapeHtml(key)}</span>` +
+      `<span class="chess-header-value">${escapeHtml(value)}</span>`,
+    );
+  }
+  if (cells.length === 0) return "";
+  return `<div class="chess-headers">${cells.join("")}</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Move list rendering
 // ---------------------------------------------------------------------------
 

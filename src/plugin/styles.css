@@ -384,6 +384,32 @@
   margin: 0;
 }
 
+/* Game-info header strip: every PGN tag as an aligned key/value grid */
+.chess-headers {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.chess-header-key {
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chess-header-value {
+  color: var(--text-normal);
+  overflow-wrap: anywhere; /* let long values like FEN wrap */
+}
+
 /* Responsive: on narrow viewports let the board fill available width */
 @media (max-width: 480px) {
   .chess-board,
