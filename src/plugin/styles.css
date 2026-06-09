@@ -1,3 +1,11 @@
+/* Comment editor modal (right-click a move -> Comment…) */
+.chess-comment-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  margin-bottom: 0.75em;
+}
+
 .chess-board,
 .chess-viewer-wrapper {
   display: inline-block;
