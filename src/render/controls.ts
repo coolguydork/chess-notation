@@ -80,7 +80,11 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     // Before-move comment drops in ahead of the move number; force the number to
     // re-show so the move that follows is still labelled.
     if (cur.commentBefore) {
-      out.push(`<span class="chess-comment">${escapeHtml(cur.commentBefore)}</span>`);
+      const activeAttr = cur.id === currentId ? ` data-active="true"` : "";
+      const del = editable && cur.id === currentId
+        ? `<button class="chess-delete-btn" data-comment-delete-id="${cur.id}" data-comment-delete-slot="before" title="Delete comment">×</button>`
+        : "";
+      out.push(`<span class="chess-comment" data-comment-id="${cur.id}" data-comment-slot="before"${activeAttr}>${escapeHtml(cur.commentBefore)}${del}</span>`);
       showNumber = true;
     }
 
@@ -106,7 +110,10 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
 
     // Annotation comment — block element so it drops below the move line
     if (cur.comment) {
-      out.push(`<span class="chess-comment">${escapeHtml(cur.comment)}</span>`);
+      const del = editable && cur.id === currentId
+        ? `<button class="chess-delete-btn" data-comment-delete-id="${cur.id}" data-comment-delete-slot="after" title="Delete comment">×</button>`
+        : "";
+      out.push(`<span class="chess-comment" data-comment-id="${cur.id}" data-comment-slot="after"${active}>${escapeHtml(cur.comment)}${del}</span>`);
       showNumber = true; // re-show move number after a block comment
     }
 
