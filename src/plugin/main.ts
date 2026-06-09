@@ -715,7 +715,9 @@ export default class ChessPlugin extends Plugin {
     if (
       !this.engineWorker ||
       this.engineWorker.path !== this.settings.enginePath ||
-      this.engineWorker.userOptionsKey !== optionsKey
+      this.engineWorker.userOptionsKey !== optionsKey ||
+      this.engineWorker.depth !== this.settings.engineDepth ||
+      this.engineWorker.multiPV !== this.settings.engineMultiPV
     ) {
       this.engineWorker?.dispose();
       this.engineWorker = new EngineWorker({

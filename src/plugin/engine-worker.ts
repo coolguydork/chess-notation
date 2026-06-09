@@ -149,6 +149,8 @@ function spawnProcess(binaryPath: string): ChildProcess {
 export class EngineWorker {
   readonly path: string;
   readonly userOptionsKey: string;
+  readonly depth: number;
+  readonly multiPV: number;
   private config: Required<EngineWorkerConfig>;
   private proc: ChildProcess | null = null;
   private binaryPath: string | null = null;
@@ -162,6 +164,8 @@ export class EngineWorker {
       depth: config.depth ?? 20,
       userOptions: config.userOptions ?? {},
     };
+    this.depth = this.config.depth;
+    this.multiPV = this.config.multiPV;
   }
 
   /** Check whether a usable engine is reachable. */
