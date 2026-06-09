@@ -1,11 +1,11 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, Menu, Modal } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, Menu, Modal, MarkdownView, Editor, Notice } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseMultiPGN } from "../core/pgn";
 import { uciSquareToIndex } from "../core/fen";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
 import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
 import type { GameEditor } from "../core/game";
-import { yamlInlineScalar } from "./yaml-block";
+import { yamlInlineScalar, buildChessBlock, replacePgnValue } from "./yaml-block";
 import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -65,7 +65,22 @@ interface ChessBlockParams {
 }
 
 function parseBlock(source: string): ChessBlockParams {
-  const raw = parseYaml(source);
+  let raw: unknown;
+  try {
+    raw = parseYaml(source);
+  } catch (err) {
+    // The body is YAML, but a pasted PGN is full of YAML-hostile characters —
+    // apostrophes (white's), colons (URLs in comments), braces — that break a
+    // quoted scalar. Point the user at the literal block scalar, which needs no
+    // escaping, instead of surfacing the cryptic js-yaml message alone.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      "Chess block: invalid YAML. If your PGN contains apostrophes, colons, or " +
+        "spans multiple lines, embed it with a literal block scalar (no quoting " +
+        "or escaping needed):\n\npgn: |\n  [Event \"…\"]\n  1. e4 e5 …\n\n" +
+        `(${detail})`,
+    );
+  }
   if (raw !== null && raw !== undefined && typeof raw !== "object") {
     throw new Error("Chess block: expected a YAML mapping");
   }
@@ -255,6 +270,57 @@ class CommentModal extends Modal {
   }
 }
 
+// Paste a raw PGN; on submit, validate it with the same parser the block uses
+// and hand back a ready-to-insert ` ```chess ` block with the PGN safely
+// embedded (no manual quoting/escaping — see buildChessBlock).
+class ImportPgnModal extends Modal {
+  constructor(app: App, private readonly onSubmit: (block: string) => void) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Insert chess board from PGN" });
+    contentEl.createEl("p", {
+      text: "Paste a PGN below. Apostrophes, colons, and line breaks are handled for you.",
+      cls: "chess-import-hint",
+    });
+
+    const input = contentEl.createEl("textarea", { cls: "chess-import-input" });
+    input.rows = 14;
+    input.placeholder = '[Event "..."]\n\n1. e4 e5 2. Nf3 Nc6 ... *';
+    input.focus();
+
+    const error = contentEl.createEl("p", { cls: "chess-import-error" });
+    error.hide();
+
+    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    const insert = buttons.createEl("button", { text: "Insert", cls: "mod-cta" });
+    insert.onclick = () => {
+      const raw = input.value.replace(/\r\n?/g, "\n").trim();
+      if (!raw) {
+        error.setText("Paste a PGN first.");
+        error.show();
+        return;
+      }
+      try {
+        parseMultiPGN(raw); // same validation the block processor runs
+      } catch (e) {
+        error.setText(`Couldn't parse that PGN: ${e instanceof Error ? e.message : String(e)}`);
+        error.show();
+        return;
+      }
+      this.onSubmit(buildChessBlock(raw));
+      this.close();
+    };
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Viewer position cache
 // When write-back triggers a re-render, the new block processor call restores
@@ -286,12 +352,8 @@ async function writeBackPgn(
   const content = await app.vault.read(abstract);
   const lines = content.split("\n");
 
-  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
-    if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
-      await app.vault.modify(abstract, lines.join("\n"));
-      return;
-    }
+  if (replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)) {
+    await app.vault.modify(abstract, lines.join("\n"));
   }
 }
 
@@ -312,12 +374,9 @@ async function writeBackFenBlock(
   const content = await app.vault.read(abstract);
   const lines = content.split("\n");
 
-  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
-    if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
-      await app.vault.modify(abstract, lines.join("\n"));
-      return;
-    }
+  if (replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)) {
+    await app.vault.modify(abstract, lines.join("\n"));
+    return;
   }
 
   // No pgn: line yet — insert one after the fen: line
@@ -716,9 +775,35 @@ export default class ChessPlugin extends Plugin {
     return this.engineWorker;
   }
 
+  // Open the paste-a-PGN modal and insert the resulting block at the cursor.
+  // Inserts on its own line(s) so the fenced block is never glued mid-paragraph.
+  private importPgn(editor: Editor): void {
+    new ImportPgnModal(this.app, (block) => {
+      const cursor = editor.getCursor();
+      const before = editor.getLine(cursor.line).slice(0, cursor.ch);
+      const lead = before.trim() === "" ? "" : "\n";
+      editor.replaceSelection(`${lead}${block}\n`);
+    }).open();
+  }
+
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ChessSettingTab(this.app, this));
+
+    this.addCommand({
+      id: "insert-chess-from-pgn",
+      name: "Insert chess board from PGN",
+      editorCallback: (editor) => this.importPgn(editor),
+    });
+
+    this.addRibbonIcon("clipboard-paste", "Insert chess board from PGN", () => {
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view) {
+        new Notice("Open a note in editing mode first.");
+        return;
+      }
+      this.importPgn(view.editor);
+    });
 
     this.registerMarkdownCodeBlockProcessor(
       "chess",

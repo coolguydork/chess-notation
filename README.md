@@ -10,6 +10,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 |---|---|
 | **FEN boards** | Paste any FEN string to render an interactive board. Click a piece to see its legal moves highlighted; click a destination to play the move. |
 | **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons, **arrow keys**, or by clicking any move token. Variations, comments, NAG glyphs, and header tags are all displayed. |
+| **Insert from PGN** | Paste a game from anywhere (Chess.com, Lichess, a database) via the *Insert chess board from PGN* command or ribbon button. Apostrophes, colons, URLs in comments, and line breaks are escaped for you, and the game is validated before it lands in your note. |
 | **Edit games in place** | Play a move on the board to extend the line or branch a variation. Right-click any move to add comments, annotation glyphs (`!`, `?`, `!!`…), delete from that point, or promote a variation to the main line. Edits are **written back to the note**. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
@@ -27,6 +28,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 - [Block syntax reference](#block-syntax-reference)
   - [FEN blocks](#fen-blocks)
   - [PGN blocks](#pgn-blocks)
+  - [Inserting a board from an existing PGN](#inserting-a-board-from-an-existing-pgn)
   - [Combined FEN + PGN](#combined-fen--pgn)
   - [Analysis blocks](#analysis-blocks)
   - [User-drawn arrows](#user-drawn-arrows)
@@ -169,6 +171,28 @@ pgn: |
   13. h5 Qg5 14. Qf3 Ng8 15. Bxf4 Qf6 16. Nc3 Bc5 17. Nd5 Qxb2 18. Bd6
   Bxg1 19. e5 Qxa1+ 20. Ke2 Na6 21. Nxg7+ Kd8 22. Qf6+ Nxf6 23. Be7# 1-0
 theme: walnut
+```
+````
+
+### Inserting a board from an existing PGN
+
+If you already have a game — copied from Chess.com or Lichess, exported from a database, or saved as a `.pgn` file — you don't have to hand-write the block. PGNs are full of characters that are awkward to put in YAML by hand: apostrophes (`white's`), colons (`plan: develop`, URLs in comments), and braces (`{…}`). Pasted between quotes, a single apostrophe ends the value early and the block fails to parse.
+
+To insert one safely, use either entry point:
+
+- **Ribbon icon** — click the clipboard icon in the left ribbon, or
+- **Command palette** — run **Insert chess board from PGN**.
+
+Either opens a dialog. Paste the PGN and click **Insert**: the game is validated, then a ready-to-render `chess` block is dropped at your cursor with the PGN embedded as a literal block scalar (`pgn: |-`) — no quoting or escaping required.
+
+If you'd rather write the block yourself, use the same literal block scalar so you can paste comments verbatim:
+
+````markdown
+```chess
+pgn: |-
+  [Event "Two Knights Defense"]
+
+  1. e4 e5 {Here's the plan: develop. See https://lichess.org/study} 2. Nf3 Nc6 *
 ```
 ````
 

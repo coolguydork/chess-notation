@@ -6,6 +6,28 @@
   margin-bottom: 0.75em;
 }
 
+/* Import-PGN modal (ribbon / command -> Insert chess board from PGN) */
+.chess-import-hint {
+  margin-top: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.chess-import-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  white-space: pre;
+  margin-bottom: 0.5em;
+}
+
+.chess-import-error {
+  margin: 0 0 0.5em;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
 .chess-board,
 .chess-viewer-wrapper {
   display: inline-block;
