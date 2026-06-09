@@ -156,28 +156,23 @@
   margin: 0 1px;
 }
 
-.chess-promote-btn {
+.chess-delete-btn {
   display: inline-flex;
   align-items: center;
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.75em;
+  font-size: 0.9em;
+  line-height: 1;
   color: var(--text-faint);
   padding: 0 2px;
-  margin-right: 2px;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  margin-left: 2px;
   vertical-align: middle;
   box-shadow: none;
 }
 
-.chess-variation:hover .chess-promote-btn {
-  opacity: 1;
-}
-
-.chess-promote-btn:hover {
-  color: var(--text-accent);
+.chess-delete-btn:hover {
+  color: var(--text-error, #d33);
 }
 
 .chess-game-selector {

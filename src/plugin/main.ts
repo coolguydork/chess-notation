@@ -1,8 +1,10 @@
 import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
 import { load as parseYaml } from "js-yaml";
-import { parseMultiPGN, serializeMoveTree } from "../core/pgn";
+import { parseMultiPGN } from "../core/pgn";
 import { uciSquareToIndex } from "../core/fen";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
+import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
+import type { GameEditor } from "../core/game";
 import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -628,7 +630,17 @@ export default class ChessPlugin extends Plugin {
           };
 
           if (params.fen && !params.pgn) {
-            const root: MoveNode = buildMoveTree(params.fen, []);
+            // cm-chess owns the editable game; fall back to a read-only render
+            // if it can't load the position.
+            let editor: GameEditor | undefined;
+            let root: MoveNode;
+            try {
+              editor = gameFromFen(params.fen);
+              root = projectGame(editor);
+            } catch {
+              editor = undefined;
+              root = buildMoveTree(params.fen, []);
+            }
 
             const sectionInfo = ctx.getSectionInfo(el);
             const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
@@ -639,7 +651,7 @@ export default class ChessPlugin extends Plugin {
             const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
 
             const appRef = this.app;
-            const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*");
+            const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", editor);
             viewer.mount();
 
             viewer.onChange((e) => {
@@ -647,8 +659,8 @@ export default class ChessPlugin extends Plugin {
             });
 
             viewer.onChange((e) => {
-              if (e.reason !== "move" && e.reason !== "promote") return;
-              writeBackFenBlock(appRef, ctx, el, serializeMoveTree(e.root, "*"));
+              if (e.reason !== "move" || !editor) return;
+              writeBackFenBlock(appRef, ctx, el, gameToPgn(editor, "*"));
             });
 
             viewer.onChange((e) => {
@@ -668,9 +680,11 @@ export default class ChessPlugin extends Plugin {
                 () => viewer.getCurrentState(),
                 this.getEngineWorker.bind(this),
                 (arrows) => { viewer.setEngineArrows(arrows); },
-                (pvMoves, upToIndex) => {
-                  viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
-                },
+                editor
+                  ? (pvMoves, upToIndex) => {
+                      viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
+                    }
+                  : undefined,
                 (s, from, to) => viewer.previewEngineMove(s, from, to),
                 () => viewer.endEnginePreview(),
               );
@@ -686,7 +700,23 @@ export default class ChessPlugin extends Plugin {
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
-          const root: MoveNode = buildMoveTree(startFen, games[0].moves);
+
+          // Single game → cm-chess owns it (editable). Multi-game stays read-only
+          // on the @mliebelt path. A single game cm-chess can't load (e.g. null
+          // moves) also falls back to read-only.
+          let editor: GameEditor | undefined;
+          let root: MoveNode;
+          if (games.length === 1) {
+            try {
+              editor = gameFromPgn(params.pgn!, params.fen);
+              root = projectGame(editor);
+            } catch {
+              editor = undefined;
+              root = buildMoveTree(startFen, games[0].moves);
+            }
+          } else {
+            root = buildMoveTree(startFen, games[0].moves);
+          }
 
           // Restore position saved before a write-back re-render
           const sectionInfo = ctx.getSectionInfo(el);
@@ -719,7 +749,7 @@ export default class ChessPlugin extends Plugin {
           }
 
           const app = this.app;
-          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result);
+          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, editor);
           viewer.mount();
 
           // Position cache listener
@@ -727,11 +757,10 @@ export default class ChessPlugin extends Plugin {
             if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
           });
 
-          // Write-back listener (single game only, tree mutations only)
+          // Write-back listener (only when cm-chess owns the game, i.e. single game)
           viewer.onChange((e) => {
-            if (e.reason !== "move" && e.reason !== "promote") return;
-            if (games.length !== 1) return;
-            writeBackPgn(app, ctx, el, serializeMoveTree(e.root, games[0].result));
+            if (e.reason !== "move" || !editor) return;
+            writeBackPgn(app, ctx, el, gameToPgn(editor, games[0].result));
           });
 
           viewer.onChange((e) => {
@@ -752,9 +781,11 @@ export default class ChessPlugin extends Plugin {
               () => viewer.getCurrentState(),
               this.getEngineWorker.bind(this),
               (arrows) => { viewer.setEngineArrows(arrows); },
-              (pvMoves, upToIndex) => {
-                viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
-              },
+              editor
+                ? (pvMoves, upToIndex) => {
+                    viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
+                  }
+                : undefined,
               (s, from, to) => viewer.previewEngineMove(s, from, to),
               () => viewer.endEnginePreview(),
             );

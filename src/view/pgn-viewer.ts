@@ -1,5 +1,7 @@
 import { buildMoveListHtml } from "../render/controls";
-import { findNodeById, attachMove, promoteVariation, nodeToPath, pathToNode } from "../core/tree";
+import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
+import { addMoveAt, removeAt, projectGame } from "../core/game";
+import type { GameEditor } from "../core/game";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
@@ -19,7 +21,7 @@ interface PgnViewerState {
   engineArrows: EngineArrow[];
 }
 
-export type ChangeReason = "navigate" | "move" | "promote" | "load-game" | "flip";
+export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -50,6 +52,9 @@ export class PgnViewer {
     private config: BoardConfig,
     current: MoveNode,
     result: string,
+    // The editable game. When present, board moves and engine grafts are routed
+    // through cm-chess; when absent the viewer is read-only (multi-game blocks).
+    private editor?: GameEditor,
     private _boardFactory?: (
       wrapper: HTMLElement,
       state: BoardState,
@@ -97,7 +102,8 @@ export class PgnViewer {
     this.moveListEl.className = "chess-move-list-container";
     viewerDiv.appendChild(this.moveListEl);
 
-    // Mount interactive board
+    // Mount interactive board (read-only when there is no editor)
+    this.config.interactive = this.editor !== undefined;
     const factory = this._boardFactory ?? mountCmBoard;
     this.board = factory(
       this.boardWrapperEl,
@@ -114,10 +120,10 @@ export class PgnViewer {
     // Move list: click delegation
     this.moveListEl.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
-      const promoteId = t.closest<HTMLElement>("[data-promote-id]")?.dataset.promoteId;
-      if (promoteId) {
-        const n = findNodeById(this.state.root, Number(promoteId));
-        if (n) this.promote(n);
+      const deleteId = t.closest<HTMLElement>("[data-delete-id]")?.dataset.deleteId;
+      if (deleteId) {
+        const n = findNodeById(this.state.root, Number(deleteId));
+        if (n) this.deleteMove(n);
         return;
       }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
@@ -189,7 +195,7 @@ export class PgnViewer {
     const color = this.state.current.state.activeColor;
     this.turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
-    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result);
+    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined);
     this.scrollActiveMoveIntoView();
   }
 
@@ -266,18 +272,34 @@ export class PgnViewer {
   }
 
   commitMove(san: string, from: number, to: number, newState: BoardState): void {
-    const newNode = attachMove(this.state.current, san, newState, from, to);
-    const lm = { from, to };
-    this.board.setState(newState, lm);
-    this.state = { ...this.state, current: newNode, engineArrows: [] };
+    if (!this.editor) return; // read-only block
+    const path = nodeToPath(this.state.current);
+    addMoveAt(this.editor, path, san);
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, [...path, san]);
+    this.board.setState(newState, { from, to });
+    this.state = { ...this.state, root, current, engineArrows: [] };
     this.render();
     this.emit("move");
   }
 
-  promote(varHead: MoveNode): void {
-    promoteVariation(varHead);
+  // Delete `node` and everything after it in its line (a whole variation if
+  // `node` is a variation head). Current relocates to the deepest surviving
+  // node on its old path — the deleted move's parent if current was removed.
+  deleteMove(node: MoveNode): void {
+    if (!this.editor) return;
+    const curPath = nodeToPath(this.state.current);
+    removeAt(this.editor, nodeToPath(node));
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, curPath);
+    this.clearHover();
+    this.cancelAnim?.();
+    this.cancelAnim = null;
+    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+    this.board.setState(current.state, lm);
+    this.state = { ...this.state, root, current, engineArrows: [] };
     this.render();
-    this.emit("promote");
+    this.emit("move");
   }
 
   setEngineArrows(arrows: EngineArrow[]): void {
@@ -316,11 +338,21 @@ export class PgnViewer {
 
   /** Graft a decoded engine PV line as variations starting from `fromNode`, navigate to the last grafted node. */
   graftLine(fromNode: MoveNode, pvMoves: PvMove[]): void {
-    let node = fromNode;
+    if (!this.editor) return; // read-only block
+    let path = nodeToPath(fromNode);
     for (const m of pvMoves) {
-      node = attachMove(node, m.san, m.state, m.from, m.to);
+      addMoveAt(this.editor, path, m.san);
+      path = [...path, m.san];
     }
-    this.goTo(node);
+    const root = projectGame(this.editor);
+    const current = pathToNode(root, path);
+    this.clearHover();
+    this.cancelAnim?.();
+    this.cancelAnim = null;
+    const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
+    this.board.setState(current.state, lm);
+    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.render();
     this.emit("move");
   }
 }

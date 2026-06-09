@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgnViewer, type ChangeEvent } from "../../src/view/pgn-viewer";
 import type { InteractiveBoardHandle } from "../../src/view/board-handle";
-import { buildMoveTree, attachMove } from "../../src/core/tree";
+import { buildMoveTree } from "../../src/core/tree";
+import { gameFromFen, gameFromPgn, projectGame } from "../../src/core/game";
+import type { GameEditor } from "../../src/core/game";
 import { parseFEN } from "../../src/core/fen";
 import { applyMoveEx } from "../../src/core/moves";
 import type { BoardState, MoveNode } from "../../src/core/types";
@@ -39,6 +41,7 @@ function makeConfig(): BoardConfig {
 function makeViewer(
   root: MoveNode,
   current: MoveNode,
+  editor?: GameEditor,
 ): {
   viewer: PgnViewer;
   stub: InteractiveBoardHandle & { _onMove?: (san: string, from: number, to: number, newState: BoardState) => void };
@@ -76,7 +79,7 @@ function makeViewer(
   // We bypass mount() by directly setting private fields via a subclass trick.
   class TestableViewer extends PgnViewer {
     constructor() {
-      super(host, root, makeConfig(), current, "*", factory);
+      super(host, root, makeConfig(), current, "*", editor, factory);
     }
     // Expose mount logic without DOM — skip mount(), use internal boot instead
     boot(): void {
@@ -182,9 +185,10 @@ describe("PgnViewer (state-machine)", () => {
   });
 
   describe("commitMove", () => {
-    it("extends the tree and emits move", () => {
-      const root = buildMoveTree(STARTING_FEN, []);
-      const { viewer } = makeViewer(root, root);
+    it("extends the tree (via the editor) and emits move", () => {
+      const editor = gameFromFen(STARTING_FEN);
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
 
@@ -197,47 +201,61 @@ describe("PgnViewer (state-machine)", () => {
     });
 
     it("does not create a duplicate node when the same SAN is played twice", () => {
-      const root = buildMoveTree(STARTING_FEN, []);
-      const { viewer } = makeViewer(root, root);
+      const editor = gameFromFen(STARTING_FEN);
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
 
       const result = applyMoveEx(startState, "e4");
       viewer.commitMove("e4", result.from, result.to, result.state);
       viewer.goPrev(); // back to root
       viewer.commitMove("e4", result.from, result.to, result.state);
 
-      expect(root.next?.san).toBe("e4");
-      expect(root.next?.variationHeads).toHaveLength(0);
+      const lastRoot = events[events.length - 1].root;
+      expect(lastRoot.next?.san).toBe("e4");
+      expect(lastRoot.next?.variationHeads).toHaveLength(0);
+    });
+
+    it("is read-only (no-op) when there is no editor", () => {
+      const root = buildMoveTree(STARTING_FEN, []);
+      const { viewer } = makeViewer(root, root); // no editor
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      const result = applyMoveEx(startState, "e4");
+      viewer.commitMove("e4", result.from, result.to, result.state);
+
+      expect(events).toHaveLength(0);
     });
   });
 
-  describe("promote", () => {
-    it("emits promote", () => {
-      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
-      const { viewer } = makeViewer(root, root);
-
-      // Add a variation node manually
-      const d4Result = applyMoveEx(startState, "d4");
-      const e4Node = root.next!;
-      const d4Node: MoveNode = {
-        id: 9999,
-        san: "d4",
-        moveNumber: 1,
-        color: "w",
-        state: d4Result.state,
-        from: d4Result.from,
-        to: d4Result.to,
-        parent: root,
-        next: null,
-        variationHeads: [],
-      };
-      e4Node.variationHeads.push(d4Node);
-
+  describe("deleteMove", () => {
+    it("truncates from a move and relocates current to the deleted move's parent", () => {
+      const editor = gameFromPgn("1. e4 e5 2. Nf3");
+      const root = projectGame(editor);
+      const e5 = root.next!.next!;
+      const nf3 = e5.next!;
+      const { viewer } = makeViewer(root, nf3, editor); // current at Nf3
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
-      viewer.promote(d4Node);
 
-      expect(events).toHaveLength(1);
-      expect(events[0].reason).toBe("promote");
+      viewer.deleteMove(e5); // delete e5 and everything after it
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.san).toBe("e4");
+      expect(last.root.next!.next).toBeNull();
+      expect(last.current.san).toBe("e4"); // relocated to e5's parent
+    });
+
+    it("is read-only (no-op) when there is no editor", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root.next!); // no editor
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      viewer.deleteMove(root.next!);
+      expect(events).toHaveLength(0);
     });
   });
 
