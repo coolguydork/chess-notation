@@ -95,6 +95,20 @@
   cursor: default;
 }
 
+/* Move-list scroll region. The list grows with every move; without a cap a long
+   game pushes the board off-screen. Cap the container's height and let it scroll
+   internally so the board stays put. The container is the stable element (its
+   inner .chess-move-list is replaced on every render), so scroll position and
+   scrollActiveMoveIntoView()'s scrollIntoView target survive re-renders. */
+.chess-move-list-container {
+  width: 100%;
+  box-sizing: border-box;
+  max-height: min(45vh, 22em);
+  overflow-y: auto;
+  padding-right: 4px; /* keep the scrollbar off the move tokens */
+  scrollbar-width: thin;
+}
+
 .chess-move-list {
   font-family: var(--font-monospace);
   font-size: 0.85em;
