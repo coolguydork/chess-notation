@@ -96,19 +96,19 @@
 }
 
 /* Move-list scroll region. The list grows with every move; without a cap a long
-   game pushes the board off-screen. Give it a default height with overflow-y:
-   auto so it scrolls internally, and resize: vertical so the user can drag the
-   bottom-right handle to set their preferred height (bounded by min/max-height).
-   The container is the stable element (its inner .chess-move-list is replaced on
-   every render), so a dragged height, scroll position, and scrollActiveMoveInto-
-   View()'s target all survive re-renders. A dragged height resets only when the
-   note re-renders fully (e.g. reopening it). */
+   game pushes the board off-screen. The viewer (PgnViewer.fitMoveListHeight) sizes
+   this to min(content, cap): short games hug their moves, long games stop at the
+   cap and scroll internally. resize: vertical adds a drag handle; a drag is
+   detected, persisted as the global default, and reused on reopen. The values
+   below are the CSS fallback + the bounds the viewer clamps drags to (min/max).
+   Keep vertical padding/border at 0 so computed height == offsetHeight, which the
+   viewer's measurements rely on. */
 .chess-move-list-container {
   width: 100%;
   box-sizing: border-box;
-  height: min(45vh, 22em); /* default; drag the handle to grow or shrink */
-  min-height: 4em;
-  max-height: 85vh;
+  height: min(45vh, 22em); /* fallback default; the viewer sets an explicit height */
+  min-height: 2.5em;       /* drag floor — keeps the box from collapsing to nothing */
+  max-height: 85vh;        /* drag ceiling */
   overflow-y: auto;
   resize: vertical;
   padding-right: 4px; /* keep the scrollbar off the move tokens */

@@ -37,6 +37,7 @@ interface ChessPluginSettings {
   engineMultiPV: number;
   engineDiscoveredOptions: UciOptionDef[]; // cached from last successful probe
   engineUserOptions: Record<string, string>; // user-set option values (setoption name X value Y)
+  moveListHeight: number | null;           // user's dragged move-list height (px); null = auto-fit
 }
 
 const DEFAULT_SETTINGS: ChessPluginSettings = {
@@ -50,6 +51,7 @@ const DEFAULT_SETTINGS: ChessPluginSettings = {
   engineMultiPV: 3,
   engineDiscoveredOptions: [],
   engineUserOptions: {},
+  moveListHeight: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -786,6 +788,16 @@ export default class ChessPlugin extends Plugin {
     }).open();
   }
 
+  // Seed a viewer with the persisted move-list height and save it back whenever
+  // the user drags the resize handle (the viewer debounces the callback).
+  private wireMoveListHeight(viewer: PgnViewer): void {
+    viewer.setMoveListHeight(this.settings.moveListHeight);
+    viewer.onMoveListResize((px) => {
+      this.settings.moveListHeight = px;
+      void this.saveSettings();
+    });
+  }
+
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ChessSettingTab(this.app, this));
@@ -852,6 +864,7 @@ export default class ChessPlugin extends Plugin {
 
             const appRef = this.app;
             const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", {}, editor);
+            this.wireMoveListHeight(viewer);
             viewer.mount();
 
             if (editor) {
@@ -957,6 +970,7 @@ export default class ChessPlugin extends Plugin {
 
           const app = this.app;
           const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, games[gameIndex].headers, editor);
+          this.wireMoveListHeight(viewer);
           viewer.mount();
 
           if (editor) {
