@@ -1,158 +1,171 @@
-import { Chess } from "cm-chess/src/Chess.js";
-import type { CmMove } from "cm-chess/src/Chess.js";
+import { parse } from "../pgn-editor";
+import {
+  childrenOf,
+  resolvePath,
+  removeAt as removeNodeAt,
+  setComment as setNodeComment,
+  setNags as setNodeNags,
+  promoteVariation as promoteNodeVariation,
+} from "../pgn-editor";
+import type { PgnNode, CommentField } from "../pgn-editor";
+import { parseFEN } from "./fen";
+import { applyMoveEx } from "./moves";
 import { buildMoveTree } from "./tree";
-import { serializeMoveTree, cleanComment } from "./pgn";
-import type { MoveNode, PgnMove } from "./types";
+import { serializeMoveTree, astToPgnMoves } from "./pgn";
+import type { MoveNode, BoardState } from "./types";
 
 // ---------------------------------------------------------------------------
-// GameEditor — cm-chess owns the editable game.
+// GameEditor — our own FEN-neutral PGN tree is the editable game.
 //
-// cm-chess (built on chess.mjs, MIT, same author as cm-chessboard) is the source
-// of truth and the engine for all PGN edits. Per the core/ convention we expose
-// it as a plain holder + functions rather than a class. The wrapped Chess
-// instance is mutated in place by the edit functions (addMoveAt / removeAt, see
-// below); the rest of the app reads a derived, immutable MoveNode tree via
-// projectGame(). Text serialization stays on our serializeMoveTree (cm-pgn's own
-// render() mis-emits NAGs and SetUp-FEN move numbers).
+// The source of truth is the pgn-editor AST (a PgnNode[] move tree, parsed by
+// our clean-room parser). chess.js is the sole rules engine: it validates moves
+// and computes positions (via applyMoveEx). Per the core/ convention this is a
+// plain holder + functions, not a class.
+//
+// Structural edits (remove / set comment / set NAGs / promote variation) need no
+// rules engine and are delegated to pgn-editor; only the engine-aware ops
+// (addMoveAt, replaceMove) live here. The rest of the app reads a derived,
+// immutable MoveNode tree via projectGame() and serializes via serializeMoveTree
+// over that projection.
 // ---------------------------------------------------------------------------
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 export interface GameEditor {
-  // cm-chess instance — mutable and library-owned; never mutate it directly,
-  // go through the edit functions in this module.
-  readonly chess: Chess;
+  readonly headers: Record<string, string>;
   readonly startFen: string;
+  // The editable move tree (pgn-editor AST). A node's `variations` are the
+  // alternatives to that node. Mutated in place by the edit functions below.
+  readonly moves: PgnNode[];
 }
 
-// Build a GameEditor for a position with no moves yet (FEN-only blocks).
-// Throws if cm-chess/chess.mjs rejects the FEN (callers fall back to read-only).
+// Build a GameEditor for a position with no moves yet (FEN-only blocks). The FEN
+// isn't validated here; projectGame() (via parseFEN) throws on a bad FEN, which
+// is where callers fall back to a read-only render.
 export function gameFromFen(fen: string): GameEditor {
-  return { chess: new Chess({ fen }), startFen: fen };
+  return { headers: {}, startFen: fen, moves: [] };
 }
 
-// Build a GameEditor from PGN movetext, optionally starting from a custom FEN.
-// Throws on unparseable movetext (e.g. null moves) — callers fall back.
+// Build a GameEditor from PGN movetext, optionally from a custom start FEN.
+// Parses strictly so an unparseable game throws and the caller falls back to
+// read-only rather than risk a lossy parse corrupting a later write-back.
 export function gameFromPgn(movetext: string, startFen?: string): GameEditor {
-  const start = startFen ?? START_FEN;
-  const pgn =
-    start !== START_FEN
-      ? `[SetUp "1"]\n[FEN "${start}"]\n\n${movetext}`
-      : movetext;
-  return { chess: new Chess({ pgn, sloppy: true }), startFen: start };
+  const ast = parse(movetext, { strict: true });
+  return { headers: ast.headers, startFen: startFen ?? START_FEN, moves: ast.moves };
 }
 
-// Project the cm-chess game into our MoveNode read-model. We convert cm-chess's
-// history to PgnMove[] and reuse the existing, tested buildMoveTree so states,
-// variation attachment, and node shape match the rest of the app exactly.
+// Project the AST into our MoveNode read-model via the existing, tested
+// buildMoveTree (so states, variation attachment, and node shape match the rest
+// of the app exactly).
 export function projectGame(editor: GameEditor): MoveNode {
-  return buildMoveTree(editor.startFen, cmHistoryToPgnMoves(editor.chess.history()));
+  return buildMoveTree(editor.startFen, astToPgnMoves(editor.moves));
 }
 
-// Serialize via our own serializer over the projection (movetext + result).
-// cm-pgn's render() is buggy for NAGs and SetUp-FEN move numbers.
+// Serialize via our serializer over the projection (movetext + result).
 export function gameToPgn(editor: GameEditor, result: string): string {
   return serializeMoveTree(projectGame(editor), result);
 }
 
 // ---------------------------------------------------------------------------
-// Editing — all mutations go through cm-chess. A position is addressed by its
-// SAN path from the start (the same paths the viewer already uses via
-// nodeToPath/pathToNode), so callers never hold cm-chess move references.
+// Editing — all mutations go through the AST. A position is addressed by its SAN
+// path from the start (the same paths the viewer uses via nodeToPath/pathToNode).
+// Traversal (childrenOf/resolvePath) lives in pgn-editor; only legality and move
+// numbering use the rules engine and stay here.
 // ---------------------------------------------------------------------------
 
-// The moves that may follow `prev` (null = the start position): the mainline
-// continuation plus the head of each variation that branches from prev.
-function childMovesOf(editor: GameEditor, prev: CmMove | null): CmMove[] {
-  const history = editor.chess.history();
-  const main: CmMove | undefined = prev ? prev.next : history[0];
-  if (!main) return [];
-  return [main, ...main.variations.map((v) => v[0])];
+// Position reached by replaying `path` from the start (for legality + numbering).
+function positionAfter(editor: GameEditor, path: string[]): BoardState {
+  let state = parseFEN(editor.startFen);
+  for (const san of path) state = applyMoveEx(state, san).state;
+  return state;
 }
 
-// Resolve a SAN path to the cm-chess move at its end (null = the root). Paths
-// originate from existing projected nodes, so they always resolve.
-function resolveMove(editor: GameEditor, path: string[]): CmMove | null {
-  let prev: CmMove | null = null;
-  for (const san of path) {
-    const found: CmMove | undefined = childMovesOf(editor, prev).find((c) => c.san === san);
-    if (!found) return prev;
-    prev = found;
-  }
-  return prev;
-}
-
-// Add `san` as a continuation of the position at `path`. Extends the mainline,
-// or branches a new variation if that position already continues. De-dupes: if
-// the move already exists there, it is a no-op (the caller just navigates to it).
+// Add `san` as a continuation of the position at `path`. Extends the line, or
+// branches a new variation if that position already continues. De-dupes: an
+// existing continuation/variation with the same SAN is a no-op.
 export function addMoveAt(editor: GameEditor, path: string[], san: string): void {
-  const prev = resolveMove(editor, path);
-  if (childMovesOf(editor, prev).some((c) => c.san === san)) return;
+  const parent = resolvePath(editor.moves, path);
+  if (childrenOf(editor.moves, parent).some((c) => c.node.san === san)) return;
 
-  if (prev) {
-    editor.chess.move(san, prev);
-    return;
-  }
+  // Validate against the rules engine before mutating, and number the new node
+  // from the position it is played from (side to move + full-move count).
+  const before = positionAfter(editor, path);
+  applyMoveEx(before, san); // throws on an illegal move; result not needed
 
-  // prev === null → adding at the root (start position).
-  const mainline = editor.chess.history();
-  if (mainline.length === 0) {
-    editor.chess.move(san); // first move of the game
-    return;
-  }
-  // Root + non-empty mainline → branch a variation of the first move. cm-pgn
-  // 4.0.6 lacks addMoveAtStart, so build the move on a scratch instance at the
-  // start position and graft it as a variation of mainline[0].
-  const scratch = new Chess({ fen: editor.startFen });
-  const m = scratch.move(san);
-  if (!m) return;
-  m.previous = null;
-  m.variation = [m];
-  mainline[0].variations.push(m.variation);
-}
+  const node: PgnNode = {
+    san,
+    moveNumber: before.fullmoveNumber,
+    color: before.activeColor,
+    nags: [],
+    variations: [],
+  };
 
-// Remove the move at `path` and everything after it in its line. If the move is
-// a variation head, the whole variation is removed. (Removing the root no-ops.)
-export function removeAt(editor: GameEditor, path: string[]): void {
-  const target = resolveMove(editor, path);
-  if (!target) return;
-
-  const mainline = editor.chess.history();
-  const isVariationHead = target.variation !== mainline && target.variation[0] === target;
-
-  if (isVariationHead) {
-    // cm-chess's undo() clobbers the mainline's next-pointer when the move is a
-    // variation head (verified bug), so splice the variation out by hand.
-    const ownerMove = target.previous ? target.previous.next : mainline[0];
-    const idx = ownerMove ? ownerMove.variations.indexOf(target.variation) : -1;
-    if (ownerMove && idx !== -1) ownerMove.variations.splice(idx, 1);
+  const line = parent ? parent.line : editor.moves;
+  const next = line[parent ? parent.index + 1 : 0];
+  if (!next) {
+    line.push(node); // no continuation here → extend this line
   } else {
-    editor.chess.undo(target);
+    next.variations.push([node]); // position already continues → branch a variation
   }
 }
 
-// Convert a cm-chess move list (mainline or variation line) to our PgnMove[].
-function cmHistoryToPgnMoves(cmMoves: CmMove[]): PgnMove[] {
-  return cmMoves.map((m) => {
-    // Displayed move number = fullmove of the position *before* the move. After a
-    // white move the fullmove is unchanged; after a black move it has incremented.
-    const fullAfter = parseInt(m.fen.split(" ")[5], 10);
-    const moveNumber = m.color === "w" ? fullAfter : fullAfter - 1;
+// Remove the move at `path` and everything after it in its line (a whole
+// variation if it is a variation head). Removing the root is a no-op.
+export function removeAt(editor: GameEditor, path: string[]): void {
+  removeNodeAt(editor.moves, path);
+}
 
-    const move: PgnMove = { san: m.san, moveNumber, color: m.color };
+// Set/clear a comment on the move at `path`. `field` selects the slot
+// (commentAfter is the common case). Note: only commentAfter survives the
+// current write-back path (gameToPgn -> serializeMoveTree projects a single
+// comment); commentMove/commentBefore persist in the AST but aren't rendered or
+// re-emitted yet. Returns whether the move was found.
+export function setComment(
+  editor: GameEditor,
+  path: string[],
+  field: CommentField,
+  text: string | null,
+): boolean {
+  return setNodeComment(editor.moves, path, field, text);
+}
 
-    const comment = m.commentAfter ? cleanComment(m.commentAfter) : "";
-    if (comment) move.comment = comment;
+// Replace the NAG list on the move at `path` (empty clears). Returns whether the
+// move was found.
+export function setNags(editor: GameEditor, path: string[], nags: number[]): boolean {
+  return setNodeNags(editor.moves, path, nags);
+}
 
-    if (m.nag) {
-      const n = parseInt(m.nag.replace(/^\$/, ""), 10);
-      if (!Number.isNaN(n)) move.nags = [n];
+// Promote the variation whose head is the move at `path` to the mainline at its
+// branch point. Returns false if `path` isn't a variation head.
+export function promoteVariation(editor: GameEditor, path: string[]): boolean {
+  return promoteNodeVariation(editor.moves, path);
+}
+
+// Replace the move at `path` with a different, legal SAN. The move's own
+// variations (alternatives at the same branch) are kept; the continuation after
+// it is re-validated against the new position and truncated at the first move
+// the change makes illegal. Returns false if `path` is the root or doesn't
+// resolve; throws if `san` is illegal at that position.
+export function replaceMove(editor: GameEditor, path: string[], san: string): boolean {
+  if (path.length === 0) return false;
+  const loc = resolvePath(editor.moves, path);
+  if (!loc || loc.node.san !== path[path.length - 1]) return false;
+
+  const before = positionAfter(editor, path.slice(0, -1));
+  let state = applyMoveEx(before, san).state; // throws if the new move is illegal
+
+  loc.node.san = san;
+
+  // Keep the longest still-legal continuation; drop the rest.
+  let j = loc.index + 1;
+  while (j < loc.line.length) {
+    try {
+      state = applyMoveEx(state, loc.line[j].san).state;
+    } catch {
+      break;
     }
-
-    if (m.variations.length > 0) {
-      move.variations = m.variations.map((v) => cmHistoryToPgnMoves(v));
-    }
-
-    return move;
-  });
+    j++;
+  }
+  loc.line.length = j;
+  return true;
 }

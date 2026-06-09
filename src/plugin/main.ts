@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, Menu, Modal } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseMultiPGN } from "../core/pgn";
 import { uciSquareToIndex } from "../core/fen";
@@ -138,6 +138,84 @@ function gameLabel(game: PgnGame, index: number): string {
     return `${prefix}${w} – ${b}`;
   }
   return `Game ${index + 1}`;
+}
+
+// Glyph -> NAG code for the annotation menu items.
+const NAG_ITEMS: ReadonlyArray<readonly [string, number]> = [
+  ["!", 1], ["?", 2], ["!!", 3], ["??", 4], ["!?", 5], ["?!", 6],
+];
+
+// Raise the per-move context menu (Obsidian Menu). All edits go through the
+// viewer, which owns the state and re-renders + writes back.
+function showMoveMenu(
+  app: App,
+  viewer: PgnViewer,
+  node: MoveNode,
+  isVariationHead: boolean,
+  evt: MouseEvent,
+): void {
+  const menu = new Menu();
+
+  if (isVariationHead) {
+    menu.addItem((i) =>
+      i.setTitle("Promote to mainline").setIcon("arrow-up").onClick(() => viewer.promoteVariationAt(node)));
+  }
+
+  menu.addItem((i) =>
+    i.setTitle("Comment…").setIcon("message-square").onClick(() => {
+      new CommentModal(app, node.comment ?? "", (text) => viewer.setCommentOn(node, text)).open();
+    }));
+
+  menu.addSeparator();
+  for (const [glyph, code] of NAG_ITEMS) {
+    const active = node.nags?.includes(code) ?? false;
+    menu.addItem((i) =>
+      i.setTitle(`Annotate ${glyph}`).setChecked(active).onClick(() => viewer.setNagOn(node, [code])));
+  }
+  menu.addItem((i) =>
+    i.setTitle("Clear annotation").setDisabled(!node.nags?.length).onClick(() => viewer.setNagOn(node, [])));
+
+  menu.addSeparator();
+  menu.addItem((i) =>
+    i.setTitle("Delete from here").setIcon("trash").onClick(() => viewer.deleteMove(node)));
+
+  menu.showAtMouseEvent(evt);
+}
+
+// Small text-input modal for editing a move's comment.
+class CommentModal extends Modal {
+  constructor(app: App, private readonly initial: string, private readonly onSubmit: (text: string) => void) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Move comment" });
+    const input = contentEl.createEl("textarea", { cls: "chess-comment-input" });
+    input.value = this.initial;
+    input.rows = 3;
+    input.focus();
+
+    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    const save = buttons.createEl("button", { text: "Save", cls: "mod-cta" });
+    save.onclick = () => {
+      this.onSubmit(input.value.trim());
+      this.close();
+    };
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+
+    // Enter saves (Shift+Enter inserts a newline).
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        save.click();
+      }
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -630,7 +708,7 @@ export default class ChessPlugin extends Plugin {
           };
 
           if (params.fen && !params.pgn) {
-            // cm-chess owns the editable game; fall back to a read-only render
+            // The AST editor owns the editable game; fall back to a read-only render
             // if it can't load the position.
             let editor: GameEditor | undefined;
             let root: MoveNode;
@@ -653,6 +731,11 @@ export default class ChessPlugin extends Plugin {
             const appRef = this.app;
             const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", editor);
             viewer.mount();
+
+            if (editor) {
+              viewer.setMoveMenuHandler((node, isVarHead, evt) =>
+                showMoveMenu(appRef, viewer, node, isVarHead, evt));
+            }
 
             viewer.onChange((e) => {
               if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
@@ -701,9 +784,9 @@ export default class ChessPlugin extends Plugin {
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
 
-          // Single game → cm-chess owns it (editable). Multi-game stays read-only
-          // on the @mliebelt path. A single game cm-chess can't load (e.g. null
-          // moves) also falls back to read-only.
+          // Single game → the AST editor owns it (editable). Multi-game stays
+          // read-only. A single game we can't parse (malformed movetext) also
+          // falls back to read-only.
           let editor: GameEditor | undefined;
           let root: MoveNode;
           if (games.length === 1) {
@@ -752,12 +835,17 @@ export default class ChessPlugin extends Plugin {
           const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, editor);
           viewer.mount();
 
+          if (editor) {
+            viewer.setMoveMenuHandler((node, isVarHead, evt) =>
+              showMoveMenu(app, viewer, node, isVarHead, evt));
+          }
+
           // Position cache listener
           viewer.onChange((e) => {
             if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
           });
 
-          // Write-back listener (only when cm-chess owns the game, i.e. single game)
+          // Write-back listener (only when the editor owns the game, i.e. single game)
           viewer.onChange((e) => {
             if (e.reason !== "move" || !editor) return;
             writeBackPgn(app, ctx, el, gameToPgn(editor, games[0].result));

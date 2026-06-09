@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { parsePGN, parseMultiPGN } from "../../src/core/pgn";
 
-// Real-world exports the hand-rolled parser was never tested against. These
-// exercise the robustness gained by delegating to @mliebelt/pgn-parser.
+// Real-world exports (Lichess/study/multi-game). These exercise the robustness
+// of our own pgn-editor parser through the core parsePGN/parseMultiPGN API.
 
-describe("real-world PGN (library-backed)", () => {
+describe("real-world PGN", () => {
   it("parses a Lichess blitz export with per-move clock annotations", () => {
     const pgn = `[Event "Rated Blitz game"]
 [Site "https://lichess.org/abcd1234"]

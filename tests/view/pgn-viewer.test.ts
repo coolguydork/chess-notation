@@ -259,6 +259,63 @@ describe("PgnViewer (state-machine)", () => {
     });
   });
 
+  describe("move-level edit ops (context-menu seam)", () => {
+    it("promoteVariationAt makes the variation the mainline and emits move", () => {
+      const editor = gameFromPgn("1. e4 e5 (1... c5 2. Nf3) 2. Nf3");
+      const root = projectGame(editor);
+      const c5 = root.next!.next!.variationHeads[0]; // e5's variation head
+      const { viewer } = makeViewer(root, root.next!, editor); // current at e4
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      viewer.promoteVariationAt(c5);
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.next!.san).toBe("c5"); // c5 promoted to mainline
+      expect(last.root.next!.next!.variationHeads.map((v) => v.san)).toContain("e5");
+    });
+
+    it("setCommentOn sets the after-move comment and emits move", () => {
+      const editor = gameFromPgn("1. e4 e5");
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      viewer.setCommentOn(root.next!, "best by test");
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.comment).toBe("best by test");
+    });
+
+    it("setNagOn annotates a move and emits move", () => {
+      const editor = gameFromPgn("1. e4 e5");
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      viewer.setNagOn(root.next!, [1]);
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(last.root.next!.nags).toEqual([1]);
+    });
+
+    it("edit ops are no-ops without an editor", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root.next!); // no editor
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      viewer.setNagOn(root.next!, [1]);
+      viewer.setCommentOn(root.next!, "x");
+      viewer.promoteVariationAt(root.next!);
+      expect(events).toHaveLength(0);
+    });
+  });
+
   describe("setEngineArrows", () => {
     it("calls board.setEngineArrows and does NOT emit a change event", () => {
       const root = buildMoveTree(STARTING_FEN, []);

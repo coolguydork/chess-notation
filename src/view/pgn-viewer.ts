@@ -1,6 +1,6 @@
 import { buildMoveListHtml } from "../render/controls";
 import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
-import { addMoveAt, removeAt, projectGame } from "../core/game";
+import { addMoveAt, removeAt, projectGame, promoteVariation, setComment, setNags } from "../core/game";
 import type { GameEditor } from "../core/game";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
@@ -45,6 +45,9 @@ export class PgnViewer {
   private hoveredId: number | null = null;
   private cancelAnim: (() => void) | null = null;
   private cancelHoverAnim: (() => void) | null = null;
+  // Plugin-supplied handler that raises the move context menu (Obsidian Menu lives
+  // in plugin/; the viewer only detects the trigger and owns the edit ops).
+  private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -53,7 +56,7 @@ export class PgnViewer {
     current: MoveNode,
     result: string,
     // The editable game. When present, board moves and engine grafts are routed
-    // through cm-chess; when absent the viewer is read-only (multi-game blocks).
+    // through the AST editor; when absent the viewer is read-only (multi-game blocks).
     private editor?: GameEditor,
     private _boardFactory?: (
       wrapper: HTMLElement,
@@ -133,6 +136,18 @@ export class PgnViewer {
       }
     });
 
+    // Move list: context menu (right-click / long-press) for editing a move.
+    // Delegated on the stable container so it survives innerHTML re-renders.
+    this.moveListEl.addEventListener("contextmenu", (e) => {
+      if (!this.editor || !this.moveMenuHandler) return;
+      const id = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
+      if (!id) return;
+      const node = findNodeById(this.state.root, Number(id));
+      if (!node) return;
+      e.preventDefault();
+      this.moveMenuHandler(node, this.isVariationHead(node), e);
+    });
+
     // Hover preview — animate the piece to the hovered position
     this.moveListEl.addEventListener("pointerover", (e) => {
       const id = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
@@ -182,6 +197,16 @@ export class PgnViewer {
 
   onChange(fn: (e: ChangeEvent) => void): void {
     this.listeners.push(fn);
+  }
+
+  // Register the handler that raises the per-move context menu (plugin-supplied).
+  setMoveMenuHandler(fn: (node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void): void {
+    this.moveMenuHandler = fn;
+  }
+
+  // A node is a variation head iff it isn't its parent's mainline continuation.
+  private isVariationHead(node: MoveNode): boolean {
+    return node.parent !== null && node.parent.next !== node;
   }
 
   private emit(reason: ChangeReason): void {
@@ -288,8 +313,37 @@ export class PgnViewer {
   // node on its old path — the deleted move's parent if current was removed.
   deleteMove(node: MoveNode): void {
     if (!this.editor) return;
-    const curPath = nodeToPath(this.state.current);
     removeAt(this.editor, nodeToPath(node));
+    this.refreshAfterEdit();
+  }
+
+  // Promote the variation whose head is `node` to the mainline at its branch.
+  promoteVariationAt(node: MoveNode): void {
+    if (!this.editor) return;
+    promoteVariation(this.editor, nodeToPath(node));
+    this.refreshAfterEdit();
+  }
+
+  // Set/clear the after-move comment on `node` (empty string clears).
+  setCommentOn(node: MoveNode, text: string): void {
+    if (!this.editor) return;
+    setComment(this.editor, nodeToPath(node), "commentAfter", text);
+    this.refreshAfterEdit();
+  }
+
+  // Replace `node`'s NAG list (e.g. [1] for "!", [] to clear).
+  setNagOn(node: MoveNode, nags: number[]): void {
+    if (!this.editor) return;
+    setNags(this.editor, nodeToPath(node), nags);
+    this.refreshAfterEdit();
+  }
+
+  // Shared tail for every editor mutation: re-project, relocate `current` onto its
+  // old SAN path (pathToNode falls back to the deepest surviving node), refresh the
+  // board + move list, and fire "move" so the block writes back.
+  private refreshAfterEdit(): void {
+    if (!this.editor) return;
+    const curPath = nodeToPath(this.state.current);
     const root = projectGame(this.editor);
     const current = pathToNode(root, curPath);
     this.clearHover();
