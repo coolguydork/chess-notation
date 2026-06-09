@@ -8,13 +8,11 @@ import type { PgnNode, PgnGameAst } from "./types";
 // (after-move comments only, no headers) this preserves full comment fidelity.
 // ---------------------------------------------------------------------------
 
-function serializeHeaders(headers: Record<string, string>): string {
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(headers)) {
+function headerTags(headers: Record<string, string>): string[] {
+  return Object.entries(headers).map(([k, v]) => {
     const escaped = v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    lines.push(`[${k} "${escaped}"]`);
-  }
-  return lines.join("\n");
+    return `[${k} "${escaped}"]`;
+  });
 }
 
 // Emit one line (mainline or a variation body). `needsNumber` forces the move
@@ -67,7 +65,17 @@ export function serializeMovetext(game: PgnGameAst): string {
 // Full PGN: headers (if any) + a blank line + movetext.
 export function serialize(game: PgnGameAst): string {
   const movetext = serializeMovetext(game);
-  const headerKeys = Object.keys(game.headers);
-  if (headerKeys.length === 0) return movetext;
-  return `${serializeHeaders(game.headers)}\n\n${movetext}`;
+  const tags = headerTags(game.headers);
+  if (tags.length === 0) return movetext;
+  return `${tags.join("\n")}\n\n${movetext}`;
+}
+
+// Full PGN on a single physical line: header tags space-joined, then movetext.
+// Still valid, re-parseable PGN (each game's result token precedes the next tag
+// pair) but free of the blank-line separator, so it fits contexts that must
+// stay on one line — e.g. a YAML `pgn:` scalar rewritten line-by-line on edit.
+export function serializeInline(game: PgnGameAst): string {
+  const movetext = serializeMovetext(game);
+  const tags = headerTags(game.headers);
+  return tags.length ? `${tags.join(" ")} ${movetext}` : movetext;
 }

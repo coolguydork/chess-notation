@@ -10,7 +10,7 @@
 export type { Color, PgnNode, PgnGameAst } from "./types";
 export { parse } from "./parser";
 export { parseGames, hasTopLevelResult } from "./parseGames";
-export { serialize, serializeMovetext } from "./serialize";
+export { serialize, serializeMovetext, serializeInline } from "./serialize";
 
 // Structural tree navigation + FEN-neutral edits (move-level Update/Delete).
 export type { NodeLoc, CommentField } from "./edit";

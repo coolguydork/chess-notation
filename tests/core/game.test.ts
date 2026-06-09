@@ -168,6 +168,14 @@ describe("gameToPgn", () => {
     );
   });
 
+  it("preserves header tags on write-back, on a single line", () => {
+    const ed = gameFromPgn(`[White "Carlsen"]\n[Black "Nepo"]\n\n1. e4 e5 *`);
+    const out = gameToPgn(ed, "*");
+    expect(out).toContain(`[White "Carlsen"]`);
+    expect(out).toContain(`[Black "Nepo"]`);
+    expect(out).not.toContain("\n"); // must fit the one YAML pgn: scalar
+  });
+
   it("uses correct move numbers from a SetUp FEN", () => {
     const fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
     expect(gameToPgn(gameFromPgn("3. Bb5 a6", fen), "*")).toBe("3. Bb5 a6 *");
