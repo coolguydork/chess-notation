@@ -19,6 +19,10 @@ import type { Color, PgnNode, PgnGameAst } from "./types";
 interface Cursor {
   readonly s: string;
   i: number;
+  // strict: throw on an unrecognised token instead of skipping it. The editor
+  // uses strict mode so an unparseable game falls back to read-only rather than
+  // silently dropping moves (which would corrupt a write-back). Default lenient.
+  readonly strict: boolean;
 }
 
 // Standard NAG glyphs -> numeric code. Longer glyphs must precede their
@@ -164,8 +168,13 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
 
     const san = readSan(c);
     if (san === null) {
-      // Unrecognised token — skip it so one stray char can't abort the parse.
-      if (!eof(c) && c.s[c.i] !== ")") c.i++;
+      if (eof(c) || c.s[c.i] === ")") break;
+      if (c.strict) {
+        throw new Error(
+          `PGN: unparseable token at ${c.i}: ${JSON.stringify(c.s.slice(c.i, c.i + 12))}`,
+        );
+      }
+      c.i++; // lenient: skip a stray char so it can't abort the whole parse
       continue;
     }
 
@@ -229,12 +238,13 @@ function parseHeaders(s: string): { headers: Record<string, string>; offset: num
 }
 
 // ---------------------------------------------------------------------------
-// parse — PGN text -> FEN-neutral AST. Lenient: missing result -> "*",
-// unparseable stray tokens are skipped rather than thrown.
+// parse — PGN text -> FEN-neutral AST. Missing result -> "*". By default
+// lenient (stray tokens skipped); pass { strict: true } to throw on the first
+// unparseable token instead (used by the editor's read-only fallback).
 // ---------------------------------------------------------------------------
-export function parse(input: string): PgnGameAst {
+export function parse(input: string, opts?: { strict?: boolean }): PgnGameAst {
   const { headers, offset } = parseHeaders(input);
-  const c: Cursor = { s: input, i: offset };
+  const c: Cursor = { s: input, i: offset, strict: opts?.strict ?? false };
   // A game with a [FEN] for a black-to-move start still numbers its first ply as
   // white unless the movetext says otherwise; the running side self-corrects on
   // the first explicit number/ellipsis. Top level seeds white / move 1.

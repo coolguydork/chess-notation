@@ -106,6 +106,13 @@ describe("addMoveAt", () => {
     expect(root.next!.variationHeads).toHaveLength(0);
     expect(root.next!.next!.variationHeads).toHaveLength(0);
   });
+
+  it("adds a pawn promotion (restored after dropping cm-chess)", () => {
+    const ed = gameFromFen("8/4P3/8/8/8/8/8/4K2k w - - 0 1");
+    addMoveAt(ed, [], "e8=Q");
+    expect(mainlineSans(projectGame(ed))).toEqual(["e8=Q"]);
+    expect(gameToPgn(ed, "*")).toBe("1. e8=Q *");
+  });
 });
 
 describe("removeAt", () => {

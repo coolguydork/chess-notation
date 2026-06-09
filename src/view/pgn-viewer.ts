@@ -53,7 +53,7 @@ export class PgnViewer {
     current: MoveNode,
     result: string,
     // The editable game. When present, board moves and engine grafts are routed
-    // through cm-chess; when absent the viewer is read-only (multi-game blocks).
+    // through the AST editor; when absent the viewer is read-only (multi-game blocks).
     private editor?: GameEditor,
     private _boardFactory?: (
       wrapper: HTMLElement,

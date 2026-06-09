@@ -103,6 +103,16 @@ describe("pgn-editor parse", () => {
     });
   });
 
+  describe("strict mode", () => {
+    it("throws on an unparseable token when strict (editor read-only fallback)", () => {
+      expect(() => parse("1. e4 @@@ e5 *", { strict: true })).toThrow();
+    });
+
+    it("skips the stray token in lenient (default) mode", () => {
+      expect(parse("1. e4 @@@ e5 *").moves.map((m) => m.san)).toEqual(["e4", "e5"]);
+    });
+  });
+
   describe("headers", () => {
     it("parses headers in source order, FEN stays a header (FEN-neutral)", () => {
       const pgn = `[Event "Test"]\n[Result "1-0"]\n[FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]\n\n1. e4 1-0`;

@@ -630,7 +630,7 @@ export default class ChessPlugin extends Plugin {
           };
 
           if (params.fen && !params.pgn) {
-            // cm-chess owns the editable game; fall back to a read-only render
+            // The AST editor owns the editable game; fall back to a read-only render
             // if it can't load the position.
             let editor: GameEditor | undefined;
             let root: MoveNode;
@@ -701,9 +701,9 @@ export default class ChessPlugin extends Plugin {
           const startFen = params.fen ?? STARTING_FEN;
           let gameIndex = 0;
 
-          // Single game → cm-chess owns it (editable). Multi-game stays read-only
-          // on the @mliebelt path. A single game cm-chess can't load (e.g. null
-          // moves) also falls back to read-only.
+          // Single game → the AST editor owns it (editable). Multi-game stays
+          // read-only on the @mliebelt path. A single game we can't parse
+          // (malformed movetext) also falls back to read-only.
           let editor: GameEditor | undefined;
           let root: MoveNode;
           if (games.length === 1) {
@@ -757,7 +757,7 @@ export default class ChessPlugin extends Plugin {
             if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
           });
 
-          // Write-back listener (only when cm-chess owns the game, i.e. single game)
+          // Write-back listener (only when the editor owns the game, i.e. single game)
           viewer.onChange((e) => {
             if (e.reason !== "move" || !editor) return;
             writeBackPgn(app, ctx, el, gameToPgn(editor, games[0].result));
