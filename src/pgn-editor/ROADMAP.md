@@ -35,10 +35,11 @@ traversal `childrenOf`/`resolvePath`/`nodeAt`); exposed through `core/game.ts`'s
   SAN, keeps the move's own variations, and truncates the continuation at the first
   move the change makes illegal.
 
-**Known limitation (small follow-up):** only `commentAfter` survives write-back —
-`gameToPgn` serializes the projected `MoveNode` (single comment slot), so
-`commentMove`/`commentBefore` persist in the AST but aren't re-emitted. Switching
-`gameToPgn` to pgn-editor's `serialize()` (full comment fidelity) closes this.
+**Comment write-back fidelity ✅** — `gameToPgn` now serializes the AST directly
+via pgn-editor's `serializeMovetext()` (movetext-only; write-back targets a single
+YAML `pgn:` line, so no headers), so all three comment positions round-trip on
+save. The projected `MoveNode` tree still carries one comment slot, so only
+`commentAfter` is *rendered* — that's a display concern, not a persistence one.
 
 ## Tier 2 — Multi-game ✅ DONE (last GPL dependency removed)
 - `parseGames(text): PgnGameAst[]` ✓ in `parseGames.ts` — a comment/variation-aware

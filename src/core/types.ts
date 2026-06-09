@@ -44,6 +44,9 @@ export interface PgnMove {
   san: string;
   moveNumber: number;
   color: Color;
+  // Comment rendered *before* this move (the PGN pre-move comment — the AST's
+  // `commentMove` slot). Distinct from `comment`, which is the after-move text.
+  commentBefore?: string;
   comment?: string;
   nags?: number[];
   variations?: PgnMove[][];
@@ -64,7 +67,8 @@ export interface MoveNode {
   san: string | null;         // null for the root (initial position)
   moveNumber: number;         // 0 for root
   color: Color | null;        // null for root
-  comment?: string;
+  commentBefore?: string;     // comment rendered before the move (AST commentMove)
+  comment?: string;           // comment rendered after the move (AST commentAfter)
   nags?: number[];
   state: BoardState;
   from: number;  // board index of the moving piece's origin (-1 for root/null moves)

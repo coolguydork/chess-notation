@@ -134,6 +134,23 @@ describe("parsePGN", () => {
       const game = parsePGN("1. e4 {\nLine one\nLine two\n} *");
       expect(game.moves[0].comment).toBe("Line one Line two");
     });
+
+    it("projects a pre-move comment to commentBefore", () => {
+      // A comment before the move (here, before move 1) is the AST's commentMove,
+      // surfaced as commentBefore on the move it precedes.
+      const game = parsePGN("{ Opening intro } 1. e4 e5 *");
+      expect(game.moves[0].commentBefore).toBe("Opening intro");
+      expect(game.moves[0].comment).toBeUndefined();
+    });
+
+    it("absorbs consecutive comments into the preceding move's after-slot", () => {
+      // PGN can't unambiguously split a comment between "after move A" and
+      // "before move B": both attach to A. commentBefore is produced only for a
+      // genuinely leading comment (e.g. a game or variation intro).
+      const game = parsePGN("1. e4 { good } { also good } e5 *");
+      expect(game.moves[0].comment).toBe("good also good");
+      expect(game.moves[1].commentBefore).toBeUndefined();
+    });
   });
 
   describe("NAGs (Numeric Annotation Glyphs)", () => {

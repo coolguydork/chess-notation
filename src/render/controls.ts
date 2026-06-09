@@ -57,6 +57,13 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
   let showNumber = needsMoveNumber;
 
   while (cur) {
+    // Before-move comment drops in ahead of the move number; force the number to
+    // re-show so the move that follows is still labelled.
+    if (cur.commentBefore) {
+      out.push(`<span class="chess-comment">${escapeHtml(cur.commentBefore)}</span>`);
+      showNumber = true;
+    }
+
     if (cur.color === "w" || showNumber) {
       const dots = cur.color === "w" ? "." : "…"; // "…" for black-to-move marker
       out.push(`<span class="chess-move-number">${cur.moveNumber}${dots}</span>`);

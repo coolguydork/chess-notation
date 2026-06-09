@@ -5,6 +5,7 @@ import { uciSquareToIndex } from "../core/fen";
 import { buildMoveTree, nodeToPath, pathToNode } from "../core/tree";
 import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
 import type { GameEditor } from "../core/game";
+import { yamlInlineScalar } from "./yaml-block";
 import { PgnViewer } from "../view/pgn-viewer";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -162,8 +163,14 @@ function showMoveMenu(
   }
 
   menu.addItem((i) =>
-    i.setTitle("Comment…").setIcon("message-square").onClick(() => {
-      new CommentModal(app, node.comment ?? "", (text) => viewer.setCommentOn(node, text)).open();
+    i.setTitle("Comment before move…").setIcon("message-square").onClick(() => {
+      new CommentModal(app, "Comment before move", node.commentBefore ?? "",
+        (text) => viewer.setCommentOn(node, text, "before")).open();
+    }));
+  menu.addItem((i) =>
+    i.setTitle("Comment after move…").setIcon("message-square").onClick(() => {
+      new CommentModal(app, "Comment after move", node.comment ?? "",
+        (text) => viewer.setCommentOn(node, text, "after")).open();
     }));
 
   menu.addSeparator();
@@ -184,13 +191,18 @@ function showMoveMenu(
 
 // Small text-input modal for editing a move's comment.
 class CommentModal extends Modal {
-  constructor(app: App, private readonly initial: string, private readonly onSubmit: (text: string) => void) {
+  constructor(
+    app: App,
+    private readonly title: string,
+    private readonly initial: string,
+    private readonly onSubmit: (text: string) => void,
+  ) {
     super(app);
   }
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Move comment" });
+    contentEl.createEl("h3", { text: this.title });
     const input = contentEl.createEl("textarea", { cls: "chess-comment-input" });
     input.value = this.initial;
     input.rows = 3;
@@ -251,7 +263,7 @@ async function writeBackPgn(
 
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${newPgn}`;
+      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
@@ -277,7 +289,7 @@ async function writeBackFenBlock(
 
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*pgn\s*:/.test(lines[i])) {
-      lines[i] = `pgn: ${newPgn}`;
+      lines[i] = `pgn: ${yamlInlineScalar(newPgn)}`;
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
@@ -286,14 +298,14 @@ async function writeBackFenBlock(
   // No pgn: line yet — insert one after the fen: line
   for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
     if (/^\s*fen\s*:/.test(lines[i])) {
-      lines.splice(i + 1, 0, `pgn: ${newPgn}`);
+      lines.splice(i + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
       await app.vault.modify(abstract, lines.join("\n"));
       return;
     }
   }
 
   // No fen: or pgn: line — empty block; insert right after the opening fence
-  lines.splice(info.lineStart + 1, 0, `pgn: ${newPgn}`);
+  lines.splice(info.lineStart + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
   await app.vault.modify(abstract, lines.join("\n"));
 }
 
