@@ -50,6 +50,8 @@ export class PgnViewer {
   // Plugin-supplied handler that raises the move context menu (Obsidian Menu lives
   // in plugin/; the viewer only detects the trigger and owns the edit ops).
   private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
+  // Plugin-supplied handler that raises the per-comment context menu (edit / delete).
+  private commentMenuHandler: ((node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -138,6 +140,21 @@ export class PgnViewer {
         if (n) this.deleteMove(n);
         return;
       }
+      const commentDel = t.closest<HTMLElement>("[data-comment-delete-id]");
+      if (commentDel) {
+        const n = findNodeById(this.state.root, Number(commentDel.dataset.commentDeleteId));
+        const slot = commentDel.dataset.commentDeleteSlot === "before" ? "before" : "after";
+        if (n) this.setCommentOn(n, "", slot);
+        return;
+      }
+      // A comment belongs to its move — clicking it navigates there, just like
+      // clicking the move itself (the × above is handled first, so it still deletes).
+      const commentId = t.closest<HTMLElement>("[data-comment-id]")?.dataset.commentId;
+      if (commentId) {
+        const n = findNodeById(this.state.root, Number(commentId));
+        if (n) this.goTo(n);
+        return;
+      }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
       if (nodeId) {
         const n = findNodeById(this.state.root, Number(nodeId));
@@ -148,8 +165,24 @@ export class PgnViewer {
     // Move list: context menu (right-click / long-press) for editing a move.
     // Delegated on the stable container so it survives innerHTML re-renders.
     this.moveListEl.addEventListener("contextmenu", (e) => {
-      if (!this.editor || !this.moveMenuHandler) return;
-      const id = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
+      if (!this.editor) return;
+      const target = e.target as HTMLElement;
+
+      // Comment menu (edit / delete) takes precedence. Comment spans aren't
+      // nested inside move spans, so the two data attributes never collide.
+      const commentEl = target.closest<HTMLElement>("[data-comment-id]");
+      if (commentEl && this.commentMenuHandler) {
+        const node = findNodeById(this.state.root, Number(commentEl.dataset.commentId));
+        const slot = commentEl.dataset.commentSlot === "before" ? "before" : "after";
+        if (node) {
+          e.preventDefault();
+          this.commentMenuHandler(node, slot, e);
+          return;
+        }
+      }
+
+      if (!this.moveMenuHandler) return;
+      const id = target.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
       if (!id) return;
       const node = findNodeById(this.state.root, Number(id));
       if (!node) return;
@@ -211,6 +244,11 @@ export class PgnViewer {
   // Register the handler that raises the per-move context menu (plugin-supplied).
   setMoveMenuHandler(fn: (node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void): void {
     this.moveMenuHandler = fn;
+  }
+
+  // Register the handler that raises the per-comment context menu (plugin-supplied).
+  setCommentMenuHandler(fn: (node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void): void {
+    this.commentMenuHandler = fn;
   }
 
   // A node is a variation head iff it isn't its parent's mainline continuation.

@@ -189,6 +189,31 @@ function showMoveMenu(
   menu.showAtMouseEvent(evt);
 }
 
+// Raise the per-comment context menu (right-click an existing comment): edit it
+// in the modal, or delete it. Both route through the viewer, which re-renders
+// and writes back.
+function showCommentMenu(
+  app: App,
+  viewer: PgnViewer,
+  node: MoveNode,
+  slot: "before" | "after",
+  evt: MouseEvent,
+): void {
+  const current = slot === "before" ? node.commentBefore ?? "" : node.comment ?? "";
+  const title = slot === "before" ? "Comment before move" : "Comment after move";
+
+  const menu = new Menu();
+  menu.addItem((i) =>
+    i.setTitle("Edit comment…").setIcon("pencil").onClick(() => {
+      new CommentModal(app, title, current,
+        (text) => viewer.setCommentOn(node, text, slot)).open();
+    }));
+  menu.addItem((i) =>
+    i.setTitle("Delete comment").setIcon("trash").onClick(() => viewer.setCommentOn(node, "", slot)));
+
+  menu.showAtMouseEvent(evt);
+}
+
 // Small text-input modal for editing a move's comment.
 class CommentModal extends Modal {
   constructor(
@@ -747,6 +772,8 @@ export default class ChessPlugin extends Plugin {
             if (editor) {
               viewer.setMoveMenuHandler((node, isVarHead, evt) =>
                 showMoveMenu(appRef, viewer, node, isVarHead, evt));
+              viewer.setCommentMenuHandler((node, slot, evt) =>
+                showCommentMenu(appRef, viewer, node, slot, evt));
             }
 
             viewer.onChange((e) => {
@@ -850,6 +877,8 @@ export default class ChessPlugin extends Plugin {
           if (editor) {
             viewer.setMoveMenuHandler((node, isVarHead, evt) =>
               showMoveMenu(app, viewer, node, isVarHead, evt));
+            viewer.setCommentMenuHandler((node, slot, evt) =>
+              showCommentMenu(app, viewer, node, slot, evt));
           }
 
           // Position cache listener
