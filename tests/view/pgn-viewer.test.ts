@@ -169,6 +169,44 @@ describe("PgnViewer (state-machine)", () => {
     });
   });
 
+  describe("keyboard navigation (handleNavKey)", () => {
+    const key = (
+      k: string,
+      mods: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {},
+    ) => ({ key: k, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+
+    it("ArrowRight steps forward and reports consumed", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      const consumed = (viewer as any).handleNavKey(key("ArrowRight"));
+      expect(consumed).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(events[0].current.san).toBe("e4");
+    });
+
+    it("ArrowLeft steps backward", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root);
+      viewer.goNext();
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      expect((viewer as any).handleNavKey(key("ArrowLeft"))).toBe(true);
+      expect(events[0].current.san).toBeNull(); // back at root
+    });
+
+    it("ignores other keys and modifier combos", () => {
+      const root = buildMoveTree(STARTING_FEN, [{ san: "e4", moveNumber: 1, color: "w" }]);
+      const { viewer } = makeViewer(root, root);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+      expect((viewer as any).handleNavKey(key("ArrowUp"))).toBe(false);
+      expect((viewer as any).handleNavKey(key("ArrowRight", { metaKey: true }))).toBe(false);
+      expect(events).toHaveLength(0);
+    });
+  });
+
   describe("goTo", () => {
     it("navigates to a specific node and emits navigate", () => {
       const root = buildMoveTree(STARTING_FEN, [
