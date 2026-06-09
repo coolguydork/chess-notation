@@ -243,3 +243,52 @@ last-move highlight, engine + user arrows, all six themes, flip board; build gre
 (#2); the board is `cm-chessboard` (#3); only the UCI glue (#4) and
 `serializeMoveTree` remain hand-rolled by design — replacing ~1,900 LOC of
 hand-rolled chess/board code with library-backed adapters.
+
+---
+
+## Outcome — what actually shipped ✅
+
+The migration is **complete and merged to `main`.** All four phases landed; the
+suite is green at **410 tests across 18 suites**. The end state matches the plan
+on three of the four components — with one deliberate divergence on #2.
+
+| # | Component | Planned target | Shipped | Notes |
+|---|---|---|---|---|
+| 1 | Rules engine | `chess.js` | **`chess.js`** ✅ | `core/chessjs-bridge.ts`; `legal.ts` 415→46, `moves.ts` 334→56. `fen.ts` kept (BoardState↔FEN primitive). |
+| 2 | PGN parse/serialize | `@mliebelt/pgn-parser` | **clean-room `pgn-editor/`** ⚠️ | Diverged — see below. `core/pgn.ts` 349→105, delegates to it. |
+| 3 | Board / interaction / animation | `cm-chessboard` | **`cm-chessboard`** ✅ | `board.ts` + `interactive-board.ts` + `animation.ts` deleted; now `view/cm-board.ts` + `board-handle.ts` + `cm-theme.css`. |
+| 4 | UCI glue | keep homemade | **kept homemade** ✅ | `core/engine.ts` + `plugin/engine-worker.ts`, by design. |
+| 5 | Block params | `js-yaml` | **`js-yaml`** ✅ | `plugin/yaml-block.ts`. |
+
+### Why #2 diverged from this plan
+
+This document recommended `@mliebelt/pgn-parser` as **Apache-2.0**. That was
+wrong twice over:
+
+1. **License.** `@mliebelt/pgn-parser` is **GPL-3.0**, not Apache. esbuild bundles
+   every `src/` import into `main.js`, so importing it would have forced the whole
+   plugin to GPL — the exact copyleft trap that disqualified `chessops` and
+   `chessground` here. A parse-only library that pins the plugin to GPL is a
+   non-starter.
+2. **Capability.** The plugin grew an *editing* surface (comments, NAGs, promote
+   variation, delete, replace-move). A parser only **reads** PGN. No MIT,
+   edit-capable PGN library exists (kokopu=LGPL; chessops & @mliebelt=GPL;
+   cm-chess/cm-pgn=MIT but buggy `undo`, no promote). That gap is the **real,
+   stated reason** the library-first rule allows building in-house.
+
+So #2 resolved to a clean-room, MIT, FEN-neutral `pgn-editor/` core (parser +
+serializer + variation-aware AST + `GameEditor` edit ops), kept liftable into its
+own package and boundary-tested. Rules/legality still come from `chess.js`; the
+editor is text/AST only. See [`src/pgn-editor/ROADMAP.md`](src/pgn-editor/ROADMAP.md).
+
+This is consistent with, not a violation of, library-first: we used the best
+library wherever one fit (#1, #3, #5), kept the small specific glue (#4), and
+built only the one component where every candidate library was either
+license-incompatible or incapable of the editing the plugin needed.
+
+### Beyond the migration
+
+The editable AST that #2 produced unlocked feature work built on top of it: move
+context menu, comment/NAG editing, promote-variation, PGN-header display,
+keyboard navigation, "Insert board from PGN", and a resizable/scrollable move
+list. None of these would have been reachable with a parse-only PGN library.

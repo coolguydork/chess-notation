@@ -3,7 +3,6 @@ import { buildMoveTree, findNodeById, buildMoveListHtml, buildHeaderHtml } from 
 import { parseFEN } from "../../src/core/fen";
 import type { BoardConfig } from "../../src/render/config";
 import type { PgnMove, MoveNode } from "../../src/core/types";
-import type { Piece } from "../../src/core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -12,8 +11,6 @@ const testConfig: BoardConfig = {
   colors: { light: "#ffffff", dark: "#000000" },
   squareSize: 50,
   showCoordinates: false,
-  pieceSource: { type: "bundled" },
-  resolvePieceUrl: (piece: Piece) => `/pieces/${piece.color}${piece.type.toUpperCase()}.svg`,
 };
 
 const italianMoves: PgnMove[] = [
