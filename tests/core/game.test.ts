@@ -172,6 +172,29 @@ describe("gameToPgn", () => {
     const fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
     expect(gameToPgn(gameFromPgn("3. Bb5 a6", fen), "*")).toBe("3. Bb5 a6 *");
   });
+
+  // The projection (astToPgnMoves) collapses to a single comment slot, so
+  // commentMove/commentBefore used to be silently dropped on write-back. Now
+  // gameToPgn serializes the AST directly and preserves all three positions.
+  it("preserves a before-the-number comment (commentMove) on write-back", () => {
+    const ed = gameFromPgn("1. e4 e5");
+    setComment(ed, ["e4"], "commentMove", "intro");
+    expect(gameToPgn(ed, "*")).toContain("{ intro }");
+  });
+
+  it("preserves a between-number-and-SAN comment (commentBefore) on write-back", () => {
+    const ed = gameFromPgn("1. e4 e5");
+    setComment(ed, ["e4"], "commentBefore", "hmm");
+    expect(gameToPgn(ed, "*")).toContain("{ hmm }");
+  });
+
+  it("round-trips all three comment positions through serialize -> parse", () => {
+    const ed = gameFromPgn("{ intro } 1. { hmm } e4 { ok } e5");
+    const reparsed = gameFromPgn(gameToPgn(ed, "*")).moves;
+    expect(reparsed[0].commentMove).toBe("intro");
+    expect(reparsed[0].commentBefore).toBe("hmm");
+    expect(reparsed[0].commentAfter).toBe("ok");
+  });
 });
 
 describe("move-level Update (Tier 1 seam)", () => {

@@ -1,4 +1,4 @@
-import { parse } from "../pgn-editor";
+import { parse, serializeMovetext } from "../pgn-editor";
 import {
   childrenOf,
   resolvePath,
@@ -11,7 +11,7 @@ import type { PgnNode, CommentField } from "../pgn-editor";
 import { parseFEN } from "./fen";
 import { applyMoveEx } from "./moves";
 import { buildMoveTree } from "./tree";
-import { serializeMoveTree, astToPgnMoves } from "./pgn";
+import { astToPgnMoves } from "./pgn";
 import type { MoveNode, BoardState } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -25,8 +25,8 @@ import type { MoveNode, BoardState } from "./types";
 // Structural edits (remove / set comment / set NAGs / promote variation) need no
 // rules engine and are delegated to pgn-editor; only the engine-aware ops
 // (addMoveAt, replaceMove) live here. The rest of the app reads a derived,
-// immutable MoveNode tree via projectGame() and serializes via serializeMoveTree
-// over that projection.
+// immutable MoveNode tree via projectGame(); serialization (gameToPgn) goes
+// straight to the AST via serializeMovetext to keep full comment fidelity.
 // ---------------------------------------------------------------------------
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -61,9 +61,12 @@ export function projectGame(editor: GameEditor): MoveNode {
   return buildMoveTree(editor.startFen, astToPgnMoves(editor.moves));
 }
 
-// Serialize via our serializer over the projection (movetext + result).
+// Serialize the AST directly (movetext + result, no headers — write-back
+// targets a single YAML `pgn:` line). Going through the AST rather than the
+// projected MoveNode tree preserves all three comment positions; the projection
+// (astToPgnMoves) keeps only commentAfter.
 export function gameToPgn(editor: GameEditor, result: string): string {
-  return serializeMoveTree(projectGame(editor), result);
+  return serializeMovetext({ headers: editor.headers, moves: editor.moves, result });
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +119,10 @@ export function removeAt(editor: GameEditor, path: string[]): void {
 }
 
 // Set/clear a comment on the move at `path`. `field` selects the slot
-// (commentAfter is the common case). Note: only commentAfter survives the
-// current write-back path (gameToPgn -> serializeMoveTree projects a single
-// comment); commentMove/commentBefore persist in the AST but aren't rendered or
-// re-emitted yet. Returns whether the move was found.
+// (commentAfter is the common case). All three slots round-trip through
+// gameToPgn now (serializeMovetext walks the AST); only commentAfter is shown
+// in the rendered MoveNode tree, since the projection keeps a single slot.
+// Returns whether the move was found.
 export function setComment(
   editor: GameEditor,
   path: string[],
