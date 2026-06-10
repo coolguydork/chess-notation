@@ -13,7 +13,7 @@ const CB = "node_modules/cm-chessboard/assets";
 for (const sub of ["pieces", "extensions/markers", "extensions/arrows"]) {
   mkdirSync(`dist/cm-chessboard/${sub}`, { recursive: true });
 }
-for (const f of ["pieces/standard.svg", "pieces/staunty.svg", "extensions/markers/markers.svg", "extensions/arrows/arrows.svg"]) {
+for (const f of ["pieces/standard.svg", "extensions/markers/markers.svg", "extensions/arrows/arrows.svg"]) {
   copyFileSync(`${CB}/${f}`, `dist/cm-chessboard/${f}`);
 }
 
