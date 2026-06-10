@@ -801,6 +801,100 @@ export default class ChessPlugin extends Plugin {
     });
   }
 
+  // Shared wiring for both block flavors (FEN-only and PGN): containers,
+  // viewer construction, position-cache restore, edit menus, write-back/flip/
+  // analysis listeners, and lifecycle registration. The branches differ only
+  // in how the game was parsed (editor/root/result/headers), which write-back
+  // rewrites the block, and any extra wrapper content (multi-game selector).
+  private mountViewer(opts: {
+    ctx: MarkdownPostProcessorContext;
+    el: HTMLElement;
+    baseConfig: BoardConfig;
+    analysis: boolean | undefined;
+    editor: GameEditor | undefined;
+    root: MoveNode;
+    result: string;
+    headers: Record<string, string>;
+    writeBack: (
+      app: App,
+      ctx: MarkdownPostProcessorContext,
+      el: HTMLElement,
+      newPgn: string,
+    ) => Promise<void>;
+    // Runs before the viewer is constructed so its DOM lands above the board;
+    // getViewer is only safe to call after mount (e.g. inside event listeners).
+    beforeViewer?: (wrapper: HTMLElement, getViewer: () => PgnViewer) => void;
+  }): void {
+    const { ctx, el, baseConfig, editor, root, result, headers, writeBack } = opts;
+
+    // Restore position saved before a write-back re-render
+    const sectionInfo = ctx.getSectionInfo(el);
+    const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
+    const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
+    const initialCurrent: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
+
+    const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
+    const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
+
+    opts.beforeViewer?.(wrapper, () => viewer);
+
+    const app = this.app;
+    const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, result, headers, editor);
+    this.wireMoveListHeight(viewer);
+    viewer.mount();
+
+    if (editor) {
+      viewer.setMoveMenuHandler((node, isVarHead, evt) =>
+        showMoveMenu(app, viewer, node, isVarHead, evt));
+      viewer.setCommentMenuHandler((node, slot, evt) =>
+        showCommentMenu(app, viewer, node, slot, evt));
+    }
+
+    // Position cache listener
+    viewer.onChange((e) => {
+      if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
+    });
+
+    // Write-back listener (only when the editor owns the game)
+    viewer.onChange((e) => {
+      if (e.reason !== "move" || !editor) return;
+      void writeBack(app, ctx, el, gameToPgn(editor, result));
+    });
+
+    viewer.onChange((e) => {
+      if (e.reason !== "flip") return;
+      void writeBackOrientation(app, ctx, el, viewer.getOrientation());
+    });
+
+    let analysisReset: (() => void) | null = null;
+    let analysisDestroy: (() => void) | null = null;
+
+    // Analysis reset on game change
+    viewer.onChange((e) => {
+      if (e.reason === "load-game") analysisReset?.();
+    });
+
+    this.mountAnalysisWhenAvailable(opts.analysis, () => {
+      const { reset, destroy } = mountAnalysisPanel(
+        outerContainer,
+        () => viewer.getCurrentState(),
+        this.getEngineWorker.bind(this),
+        (arrows) => { viewer.setEngineArrows(arrows); },
+        editor
+          ? (pvMoves, upToIndex) => {
+              viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
+            }
+          : undefined,
+        (s, from, to) => viewer.previewEngineMove(s, from, to),
+        () => viewer.endEnginePreview(),
+      );
+      analysisReset = reset;
+      analysisDestroy = destroy;
+    });
+
+    ctx.addChild(new PgnViewerChild(el, viewer, () => analysisDestroy?.()));
+  }
+
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ChessSettingTab(this.app, this));
@@ -854,66 +948,17 @@ export default class ChessPlugin extends Plugin {
               root = buildMoveTree(params.fen, []);
             }
 
-            const sectionInfo = ctx.getSectionInfo(el);
-            const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
-            const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
-            const initialCurrent: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
-
-            const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
-            const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
-
-            const appRef = this.app;
-            const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, "*", {}, editor);
-            this.wireMoveListHeight(viewer);
-            viewer.mount();
-
-            if (editor) {
-              viewer.setMoveMenuHandler((node, isVarHead, evt) =>
-                showMoveMenu(appRef, viewer, node, isVarHead, evt));
-              viewer.setCommentMenuHandler((node, slot, evt) =>
-                showCommentMenu(appRef, viewer, node, slot, evt));
-            }
-
-            viewer.onChange((e) => {
-              if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
+            this.mountViewer({
+              ctx,
+              el,
+              baseConfig,
+              analysis: params.analysis,
+              editor,
+              root,
+              result: "*",
+              headers: {},
+              writeBack: writeBackFenBlock,
             });
-
-            viewer.onChange((e) => {
-              if (e.reason !== "move" || !editor) return;
-              writeBackFenBlock(appRef, ctx, el, gameToPgn(editor, "*"));
-            });
-
-            viewer.onChange((e) => {
-              if (e.reason !== "flip") return;
-              writeBackOrientation(appRef, ctx, el, viewer.getOrientation());
-            });
-
-            let analysisFenReset: (() => void) | null = null;
-            let analysisFenDestroy: (() => void) | null = null;
-
-            viewer.onChange((e) => {
-              if (e.reason === "load-game") analysisFenReset?.();
-            });
-
-            this.mountAnalysisWhenAvailable(params.analysis, () => {
-              const { reset, destroy } = mountAnalysisPanel(
-                outerContainer,
-                () => viewer.getCurrentState(),
-                this.getEngineWorker.bind(this),
-                (arrows) => { viewer.setEngineArrows(arrows); },
-                editor
-                  ? (pvMoves, upToIndex) => {
-                      viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
-                    }
-                  : undefined,
-                (s, from, to) => viewer.previewEngineMove(s, from, to),
-                () => viewer.endEnginePreview(),
-              );
-              analysisFenReset = reset;
-              analysisFenDestroy = destroy;
-            });
-
-            ctx.addChild(new PgnViewerChild(el, viewer, () => analysisFenDestroy?.()));
             return;
           }
 
@@ -921,7 +966,6 @@ export default class ChessPlugin extends Plugin {
           // NAG symbols, and inline annotations.
           const games = parseMultiPGN(params.pgn!);
           const startFen = params.fen ?? STARTING_FEN;
-          let gameIndex = 0;
 
           // Single game → the AST editor owns it (editable). Multi-game stays
           // read-only. A single game we can't parse (malformed movetext) also
@@ -940,91 +984,37 @@ export default class ChessPlugin extends Plugin {
             root = buildMoveTree(startFen, games[0].moves);
           }
 
-          // Restore position saved before a write-back re-render
-          const sectionInfo = ctx.getSectionInfo(el);
-          const viewerKey = sectionInfo ? `${ctx.sourcePath}:${sectionInfo.lineStart}` : null;
-          const savedPath = viewerKey ? viewerPositionCache.get(viewerKey) : undefined;
-          const initialCurrent: MoveNode = savedPath ? pathToNode(root, savedPath) : root;
-
-          const outerContainer = el.createDiv({ cls: "chess-analysis-container" });
-          const wrapper = outerContainer.createDiv({ cls: "chess-viewer-wrapper" });
-
-          // Game selector — only shown when the PGN contains more than one game
-          if (games.length > 1) {
-            const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
-            if (games.length > 1) {
-              selectorDiv.createEl("p", {
-                text: "Editing is disabled for multi-game PGN files.",
-                cls: "chess-multigame-notice",
-              });
-            }
-            const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
-            games.forEach((g: PgnGame, i: number) => {
-              const opt = select.createEl("option", { value: String(i), text: gameLabel(g, i) });
-              if (i === gameIndex) opt.selected = true;
-            });
-            select.addEventListener("change", () => {
-              gameIndex = parseInt(select.value, 10);
-              const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
-              viewer.loadGame(newRoot, games[gameIndex].result, games[gameIndex].headers);
-            });
-          }
-
-          const app = this.app;
-          const viewer = new PgnViewer(wrapper, root, baseConfig, initialCurrent, games[0].result, games[gameIndex].headers, editor);
-          this.wireMoveListHeight(viewer);
-          viewer.mount();
-
-          if (editor) {
-            viewer.setMoveMenuHandler((node, isVarHead, evt) =>
-              showMoveMenu(app, viewer, node, isVarHead, evt));
-            viewer.setCommentMenuHandler((node, slot, evt) =>
-              showCommentMenu(app, viewer, node, slot, evt));
-          }
-
-          // Position cache listener
-          viewer.onChange((e) => {
-            if (viewerKey) viewerPositionCache.set(viewerKey, nodeToPath(e.current));
+          this.mountViewer({
+            ctx,
+            el,
+            baseConfig,
+            analysis: params.analysis,
+            editor,
+            root,
+            result: games[0].result,
+            headers: games[0].headers,
+            writeBack: writeBackPgn,
+            // Game selector — only shown when the PGN contains more than one game
+            beforeViewer: games.length > 1
+              ? (wrapper, getViewer) => {
+                  const selectorDiv = wrapper.createDiv({ cls: "chess-game-selector" });
+                  selectorDiv.createEl("p", {
+                    text: "Editing is disabled for multi-game PGN files.",
+                    cls: "chess-multigame-notice",
+                  });
+                  const select = selectorDiv.createEl("select", { cls: "chess-game-select" });
+                  games.forEach((g: PgnGame, i: number) => {
+                    const opt = select.createEl("option", { value: String(i), text: gameLabel(g, i) });
+                    if (i === 0) opt.selected = true;
+                  });
+                  select.addEventListener("change", () => {
+                    const gameIndex = parseInt(select.value, 10);
+                    const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
+                    getViewer().loadGame(newRoot, games[gameIndex].result, games[gameIndex].headers);
+                  });
+                }
+              : undefined,
           });
-
-          // Write-back listener (only when the editor owns the game, i.e. single game)
-          viewer.onChange((e) => {
-            if (e.reason !== "move" || !editor) return;
-            writeBackPgn(app, ctx, el, gameToPgn(editor, games[0].result));
-          });
-
-          viewer.onChange((e) => {
-            if (e.reason !== "flip") return;
-            writeBackOrientation(app, ctx, el, viewer.getOrientation());
-          });
-
-          let analysisReset: (() => void) | null = null;
-          let analysisDestroy: (() => void) | null = null;
-
-          // Analysis reset on game change
-          viewer.onChange((e) => {
-            if (e.reason === "load-game") analysisReset?.();
-          });
-
-          this.mountAnalysisWhenAvailable(params.analysis, () => {
-            const { reset, destroy } = mountAnalysisPanel(
-              outerContainer,
-              () => viewer.getCurrentState(),
-              this.getEngineWorker.bind(this),
-              (arrows) => { viewer.setEngineArrows(arrows); },
-              editor
-                ? (pvMoves, upToIndex) => {
-                    viewer.graftLine(viewer.getCurrentNode(), pvMoves.slice(0, upToIndex + 1));
-                  }
-                : undefined,
-              (s, from, to) => viewer.previewEngineMove(s, from, to),
-              () => viewer.endEnginePreview(),
-            );
-            analysisReset = reset;
-            analysisDestroy = destroy;
-          });
-
-          ctx.addChild(new PgnViewerChild(el, viewer, () => analysisDestroy?.()));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           el.createEl("pre", { text: `Chess error: ${msg}`, cls: "chess-error" });
