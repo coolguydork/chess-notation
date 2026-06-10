@@ -110,7 +110,10 @@ class FakeEngine implements ChildProcess {
   killed = false;
   /** Override the response to `go` (e.g. to simulate an engine crash). */
   onGo: (() => void) | null = null;
+  /** Override the response to `isready` (e.g. an engine that dies loading weights). */
+  onIsReady: (() => void) | null = null;
   private stdoutCb: ((chunk: Buffer | string) => void) | null = null;
+  private stderrCb: ((chunk: Buffer | string) => void) | null = null;
   private closeCb: ((...args: unknown[]) => void) | null = null;
   private errorCb: ((...args: unknown[]) => void) | null = null;
 
@@ -129,7 +132,9 @@ class FakeEngine implements ChildProcess {
     },
   };
   stderr = {
-    on: (_event: "data", _cb: (chunk: Buffer | string) => void): void => {},
+    on: (_event: "data", cb: (chunk: Buffer | string) => void): void => {
+      this.stderrCb = cb;
+    },
   };
 
   on(event: "close" | "error", cb: (...args: unknown[]) => void): void {
@@ -150,6 +155,10 @@ class FakeEngine implements ChildProcess {
     this.closeCb?.(1);
   }
 
+  emitStderr(text: string): void {
+    this.stderrCb?.(text + "\n");
+  }
+
   emitError(err: Error): void {
     this.errorCb?.(err);
   }
@@ -166,7 +175,8 @@ class FakeEngine implements ChildProcess {
       this.emit("option name Threads type spin default 1 min 1 max 512");
       this.emit("uciok");
     } else if (cmd === "isready") {
-      this.emit("readyok");
+      if (this.onIsReady) this.onIsReady();
+      else this.emit("readyok");
     } else if (cmd.startsWith("go")) {
       if (this.onGo) this.onGo();
       else this.defaultGo();
@@ -311,6 +321,29 @@ describe("EngineWorker", () => {
     const result = await worker.analyze(state, []);
     expect(result.bestMove).toBe("e2e4");
     expect(spawnFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns options from the uciok phase even when the engine dies at isready", async () => {
+    // Lc0 without a weights file: answers uci/uciok fine, exits while loading
+    // the network at isready. The advertised options must still come through —
+    // they include the very option (WeightsFile) needed to fix the setup.
+    const { worker } = makeWorker({}, (proc) => {
+      proc.onIsReady = () => proc.emitClose();
+    });
+    const opts = await worker.discoverOptions();
+    expect(opts.map((o) => o.name)).toEqual(["MultiPV", "Threads"]);
+  });
+
+  it("includes the stderr tail in the error when the engine exits", async () => {
+    const { worker } = makeWorker({}, (proc) => {
+      proc.onGo = () => {
+        proc.emitStderr("Cannot open weights file: <autodiscover>");
+        proc.emitClose();
+      };
+    });
+    await expect(worker.analyze(state, [])).rejects.toThrow(
+      /Engine process exited: Cannot open weights file/
+    );
   });
 
   it("dispose kills the process and later analyses reject", async () => {

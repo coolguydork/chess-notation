@@ -164,6 +164,7 @@ export class EngineWorker {
   private proc: ChildProcess | null = null;
   private handshakeDone = false;
   private stdoutBuffer = "";
+  private stderrBuffer = "";
   private waiter: LineWaiter | null = null;
   private advertisedOptions: UciOptionDef[] = [];
   private queue: Promise<unknown> = Promise.resolve();
@@ -218,7 +219,11 @@ export class EngineWorker {
         await this.ensureProcess();
         return [...this.advertisedOptions];
       } catch {
-        return [];
+        // Options are collected during the uciok phase, so they survive an
+        // engine that dies later in the handshake — e.g. Lc0 without weights
+        // exits at isready, and WeightsFile is exactly the option the user
+        // needs to see to fix that.
+        return [...this.advertisedOptions];
       } finally {
         this.scheduleIdleQuit();
       }
@@ -277,6 +282,7 @@ export class EngineWorker {
 
   private startProcess(binaryPath: string): ChildProcess {
     const proc = this.spawnFn(binaryPath);
+    this.stderrBuffer = "";
     proc.stdout.on("data", (chunk) => {
       if (this.proc !== proc) return; // late flush from a replaced process
       this.stdoutBuffer += chunk.toString();
@@ -287,13 +293,20 @@ export class EngineWorker {
         if (line) this.waiter?.onLine(line);
       }
     });
-    // Drain stderr so chatty engines (Lc0 logs there) never fill the pipe and stall.
-    proc.stderr.on("data", () => { /* drained */ });
+    // Drain stderr so chatty engines (Lc0 logs there) never fill the pipe and
+    // stall; keep a short tail because fatal config errors (e.g. Lc0 missing
+    // weights) are reported there right before the process exits.
+    proc.stderr.on("data", (chunk) => {
+      if (this.proc !== proc) return;
+      this.stderrBuffer = (this.stderrBuffer + chunk.toString()).slice(-500);
+    });
     proc.on("error", (err) => {
       if (this.proc === proc) this.onProcessGone(err instanceof Error ? err : new Error(String(err)));
     });
     proc.on("close", () => {
-      if (this.proc === proc) this.onProcessGone(new Error("Engine process exited"));
+      if (this.proc !== proc) return;
+      const tail = this.stderrBuffer.trim().split("\n").slice(-3).join(" | ").trim();
+      this.onProcessGone(new Error(tail ? `Engine process exited: ${tail}` : "Engine process exited"));
     });
     return proc;
   }
