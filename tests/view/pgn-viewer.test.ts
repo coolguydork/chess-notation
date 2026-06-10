@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgnViewer, type ChangeEvent } from "../../src/view/pgn-viewer";
 import type { InteractiveBoardHandle } from "../../src/view/board-handle";
 import { buildMoveTree } from "../../src/core/tree";
-import { gameFromFen, gameFromPgn, projectGame } from "../../src/core/game";
+import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../../src/core/game";
 import type { GameEditor } from "../../src/core/game";
 import { parseFEN } from "../../src/core/fen";
 import { applyMoveEx } from "../../src/core/moves";
@@ -26,6 +26,13 @@ function makeStubBoard(): InteractiveBoardHandle & { _onMove?: (san: string, fro
 }
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+// Display comments following a node, in order.
+function tailComments(node: MoveNode): string[] {
+  return node.tail
+    .filter((t): t is Extract<typeof t, { kind: "comment" }> => t.kind === "comment")
+    .map((t) => t.comment.text);
+}
 
 function makeConfig(): BoardConfig {
   return {
@@ -315,49 +322,76 @@ describe("PgnViewer (state-machine)", () => {
       expect(last.root.next!.next!.variationHeads.map((v) => v.san)).toContain("e5");
     });
 
-    it("setCommentOn sets the after-move comment and emits move", () => {
+    it("setAdjacentCommentOn(after) inserts a comment item after the move and emits move", () => {
       const editor = gameFromPgn("1. e4 e5");
       const root = projectGame(editor);
       const { viewer } = makeViewer(root, root, editor);
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
 
-      viewer.setCommentOn(root.next!, "best by test");
+      viewer.setAdjacentCommentOn(root.next!, "after", "best by test");
 
       const last = events[events.length - 1];
       expect(last.reason).toBe("move");
-      expect(last.root.next!.comment).toBe("best by test");
+      expect(tailComments(last.root.next!)).toEqual(["best by test"]);
+      expect(gameToPgn(editor, "*")).toBe("1. e4 { best by test } 1... e5 *");
     });
 
-    it("setCommentOn(before) sets the before-move comment and emits move", () => {
+    it("setAdjacentCommentOn(before) inserts a leading comment item and emits move", () => {
       const editor = gameFromPgn("1. e4 e5");
       const root = projectGame(editor);
       const { viewer } = makeViewer(root, root, editor);
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
 
-      viewer.setCommentOn(root.next!, "before e4", "before");
+      viewer.setAdjacentCommentOn(root.next!, "before", "before e4");
 
       const last = events[events.length - 1];
       expect(last.reason).toBe("move");
-      expect(last.root.next!.commentBefore).toBe("before e4");
-      expect(last.root.next!.comment).toBeUndefined(); // after-slot untouched
+      expect(tailComments(last.root)).toEqual(["before e4"]); // sits in the root's tail
+      expect(tailComments(last.root.next!)).toEqual([]);      // not after e4
     });
 
-    it("setCommentOn(mid) sets the between-number-and-move comment and emits move", () => {
+    it("adjacentCommentTextOf reads the neighbouring item for modal seeding", () => {
+      const editor = gameFromPgn("1. e4 { hi } 1... e5");
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+
+      // The same item is e4's after-neighbour and e5's before-neighbour.
+      expect(viewer.adjacentCommentTextOf(root.next!, "after")).toBe("hi");
+      expect(viewer.adjacentCommentTextOf(root.next!.next!, "before")).toBe("hi");
+      expect(viewer.adjacentCommentTextOf(root.next!, "before")).toBe("");
+    });
+
+    it("setMidCommentOn sets the between-number-and-move comment and emits move", () => {
       const editor = gameFromPgn("1. e4 e5");
       const root = projectGame(editor);
       const { viewer } = makeViewer(root, root, editor);
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
 
-      viewer.setCommentOn(root.next!, "mid e4", "mid");
+      viewer.setMidCommentOn(root.next!, "mid e4");
 
       const last = events[events.length - 1];
       expect(last.reason).toBe("move");
       expect(last.root.next!.commentMid).toBe("mid e4");
-      expect(last.root.next!.commentBefore).toBeUndefined(); // other slots untouched
-      expect(last.root.next!.comment).toBeUndefined();
+      expect(tailComments(last.root.next!)).toEqual([]); // no stream item created
+    });
+
+    it("updateCommentOn edits an existing comment item by identity and emits move", () => {
+      const editor = gameFromPgn("1. e4 { old } 1... e5");
+      const root = projectGame(editor);
+      const { viewer } = makeViewer(root, root, editor);
+      const events: ChangeEvent[] = [];
+      viewer.onChange((e) => events.push(e));
+
+      const entry = root.next!.tail[0];
+      if (entry.kind !== "comment") throw new Error("expected a comment entry");
+      viewer.updateCommentOn(entry.comment.source, "new");
+
+      const last = events[events.length - 1];
+      expect(last.reason).toBe("move");
+      expect(tailComments(last.root.next!)).toEqual(["new"]);
     });
 
     it("setNagOn annotates a move and emits move", () => {
@@ -380,7 +414,8 @@ describe("PgnViewer (state-machine)", () => {
       const events: ChangeEvent[] = [];
       viewer.onChange((e) => events.push(e));
       viewer.setNagOn(root.next!, [1]);
-      viewer.setCommentOn(root.next!, "x");
+      viewer.setAdjacentCommentOn(root.next!, "after", "x");
+      viewer.setMidCommentOn(root.next!, "x");
       viewer.promoteVariationAt(root.next!);
       expect(events).toHaveLength(0);
     });

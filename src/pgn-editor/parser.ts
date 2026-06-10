@@ -1,4 +1,4 @@
-import type { Color, PgnNode, PgnGameAst } from "./types";
+import type { Color, PgnItem, PgnNode, PgnGameAst } from "./types";
 
 // ---------------------------------------------------------------------------
 // pgn-editor — clean-room PGN parser
@@ -141,16 +141,18 @@ function advance(t: Turn): Turn {
 // Parse a movetext line until ")" (variation close), a result token, or EOF.
 // `start` seeds the side/number for the first ply (a variation inherits these
 // from the move it replaces). The result token, if any, is returned separately.
-function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string | null } {
-  const moves: PgnNode[] = [];
+//
+// The line is read as a flat token stream and emitted as one: comments and
+// variations become items in source order, with no attribution to a move. Only
+// two reads attach to a move, because their syntax binds them: NAGs (apply to
+// the move immediately prior) and the mid comment inside a number–SAN unit.
+function parseLine(c: Cursor, start: Turn): { items: PgnItem[]; result: string | null } {
+  const items: PgnItem[] = [];
   let turn = start;
+  let lastMove: PgnNode | null = null;
   let result: string | null = null;
 
   for (;;) {
-    // A comment here can only lead the line (game or variation intro): the
-    // post-SAN tail loop consumes everything after a move, including comments
-    // that follow its variations. It becomes the upcoming ply's commentMove.
-    const commentMove = readComments(c);
     skipSpace(c);
     if (eof(c) || c.s[c.i] === ")") break;
 
@@ -160,16 +162,51 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
       break;
     }
 
+    const cm = readComment(c);
+    if (cm !== null) {
+      items.push({ kind: "comment", text: cm });
+      continue;
+    }
+
+    if (c.s[c.i] === "(") {
+      c.i++; // consume "("
+      // A variation replaces the move immediately prior, so it replays from
+      // that move's own side/number.
+      const sub = parseLine(c, lastMove ? { color: lastMove.color, num: lastMove.moveNumber } : turn);
+      skipSpace(c);
+      if (c.s[c.i] === ")") c.i++; // consume ")"
+      if (lastMove === null) {
+        // A RAV with no preceding move has nothing to unplay (invalid PGN).
+        if (c.strict) throw new Error(`PGN: variation with no preceding move at ${c.i}`);
+        continue; // lenient: drop it; it cannot be anchored
+      }
+      if (sub.items.length > 0) items.push({ kind: "variation", items: sub.items });
+      continue;
+    }
+
+    const nag = readNag(c);
+    if (nag !== null) {
+      if (lastMove === null) {
+        if (c.strict) throw new Error(`PGN: NAG with no preceding move at ${c.i}`);
+        continue; // lenient: drop it
+      }
+      lastMove.nags.push(nag);
+      continue;
+    }
+
     // Optional move number (corrects running side/number via the ellipsis).
     const mn = readMoveNumber(c);
     if (mn) turn = { color: mn.color, num: mn.num };
 
-    // Comments between the number and the SAN.
-    const commentBefore = readComments(c);
+    // Comments between the number and the SAN stay on the move they introduce.
+    const commentMid = readComments(c);
     skipSpace(c);
 
     const san = readSan(c);
     if (san === null) {
+      // A mid comment with no SAN after it (dangling number before ")" / EOF):
+      // keep the text as a standalone item so nothing is silently dropped.
+      if (commentMid) items.push({ kind: "comment", text: commentMid });
       if (eof(c) || c.s[c.i] === ")") break;
       if (c.strict) {
         throw new Error(
@@ -180,46 +217,14 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
       continue;
     }
 
-    const node: PgnNode = { san, moveNumber: turn.num, color: turn.color, nags: [], variations: [] };
-    if (commentMove) node.commentMove = commentMove;
-    if (commentBefore) node.commentBefore = commentBefore;
-
-    // After the SAN: NAGs, after-comments, and variations may interleave in any
-    // order. A comment anywhere in this tail belongs to THIS move's after-slot —
-    // a comment following a move (or one of its variations) annotates that move;
-    // commentMove is only for a comment that genuinely leads a line. Variations
-    // branch from this ply's parent — i.e. they are alternatives to THIS move,
-    // so they start at this ply's side/number.
-    let commentAfter: string | undefined;
-    for (;;) {
-      skipSpace(c);
-      const nag = readNag(c);
-      if (nag !== null) {
-        node.nags.push(nag);
-        continue;
-      }
-      const cm = readComment(c);
-      if (cm !== null) {
-        commentAfter = commentAfter ? `${commentAfter} ${cm}` : cm;
-        continue;
-      }
-      if (c.s[c.i] === "(") {
-        c.i++; // consume "("
-        const sub = parseLine(c, { color: turn.color, num: turn.num });
-        skipSpace(c);
-        if (c.s[c.i] === ")") c.i++; // consume ")"
-        if (sub.moves.length > 0) node.variations.push(sub.moves);
-        continue;
-      }
-      break;
-    }
-    if (commentAfter) node.commentAfter = commentAfter;
-
-    moves.push(node);
+    const node: PgnNode = { kind: "move", san, moveNumber: turn.num, color: turn.color, nags: [] };
+    if (commentMid) node.commentMid = commentMid;
+    items.push(node);
+    lastMove = node;
     turn = advance(turn);
   }
 
-  return { moves, result };
+  return { items, result };
 }
 
 // Strip and parse leading [Tag "value"] header lines; returns the headers (in
@@ -251,6 +256,6 @@ export function parse(input: string, opts?: { strict?: boolean }): PgnGameAst {
   // A game with a [FEN] for a black-to-move start still numbers its first ply as
   // white unless the movetext says otherwise; the running side self-corrects on
   // the first explicit number/ellipsis. Top level seeds white / move 1.
-  const { moves, result } = parseLine(c, { color: "w", num: 1 });
-  return { headers, moves, result: result ?? "*" };
+  const { items, result } = parseLine(c, { color: "w", num: 1 });
+  return { headers, items, result: result ?? "*" };
 }

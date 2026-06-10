@@ -6,7 +6,7 @@ import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
 import type { GameEditor } from "../core/game";
 import { yamlInlineScalar, buildChessBlock, replacePgnValue } from "./yaml-block";
 import { PgnViewer } from "../view/pgn-viewer";
-import type { CommentSlot } from "../view/pgn-viewer";
+import type { CommentTarget } from "../view/pgn-viewer";
 import { mountAnalysisPanel } from "../view/analysis-panel";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -156,13 +156,13 @@ function showMoveMenu(
 
   menu.addItem((i) =>
     i.setTitle("Comment before move…").setIcon("message-square").onClick(() => {
-      new CommentModal(app, "Comment before move", node.commentBefore ?? "",
-        (text) => viewer.setCommentOn(node, text, "before")).open();
+      new CommentModal(app, "Comment before move", viewer.adjacentCommentTextOf(node, "before"),
+        (text) => viewer.setAdjacentCommentOn(node, "before", text)).open();
     }));
   menu.addItem((i) =>
     i.setTitle("Comment after move…").setIcon("message-square").onClick(() => {
-      new CommentModal(app, "Comment after move", node.comment ?? "",
-        (text) => viewer.setCommentOn(node, text, "after")).open();
+      new CommentModal(app, "Comment after move", viewer.adjacentCommentTextOf(node, "after"),
+        (text) => viewer.setAdjacentCommentOn(node, "after", text)).open();
     }));
 
   menu.addSeparator();
@@ -183,31 +183,29 @@ function showMoveMenu(
 
 // Raise the per-comment context menu (right-click an existing comment): edit it
 // in the modal, or delete it. Both route through the viewer, which re-renders
-// and writes back.
+// and writes back. A standalone comment is addressed by item identity; the mid
+// comment ("1. { x } e4") goes through its move.
 function showCommentMenu(
   app: App,
   viewer: PgnViewer,
-  node: MoveNode,
-  slot: CommentSlot,
+  target: CommentTarget,
   evt: MouseEvent,
 ): void {
-  const current =
-    slot === "before" ? node.commentBefore ?? ""
-    : slot === "mid" ? node.commentMid ?? ""
-    : node.comment ?? "";
-  const title =
-    slot === "before" ? "Comment before move"
-    : slot === "mid" ? "Comment between number and move"
-    : "Comment after move";
+  const mid = target.kind === "mid";
+  const current = mid ? target.node.commentMid ?? "" : target.text;
+  const title = mid ? "Comment between number and move" : "Comment";
+  const save = (text: string): void => {
+    if (mid) viewer.setMidCommentOn(target.node, text);
+    else viewer.updateCommentOn(target.comment, text);
+  };
 
   const menu = new Menu();
   menu.addItem((i) =>
     i.setTitle("Edit comment…").setIcon("pencil").onClick(() => {
-      new CommentModal(app, title, current,
-        (text) => viewer.setCommentOn(node, text, slot)).open();
+      new CommentModal(app, title, current, save).open();
     }));
   menu.addItem((i) =>
-    i.setTitle("Delete comment").setIcon("trash").onClick(() => viewer.setCommentOn(node, "", slot)));
+    i.setTitle("Delete comment").setIcon("trash").onClick(() => save("")));
 
   menu.showAtMouseEvent(evt);
 }
@@ -738,8 +736,8 @@ export default class ChessPlugin extends Plugin {
     if (editor) {
       viewer.setMoveMenuHandler((node, isVarHead, evt) =>
         showMoveMenu(app, viewer, node, isVarHead, evt));
-      viewer.setCommentMenuHandler((node, slot, evt) =>
-        showCommentMenu(app, viewer, node, slot, evt));
+      viewer.setCommentMenuHandler((target, evt) =>
+        showCommentMenu(app, viewer, target, evt));
     }
 
     // Position cache listener
@@ -870,10 +868,10 @@ export default class ChessPlugin extends Plugin {
               root = projectGame(editor);
             } catch {
               editor = undefined;
-              root = buildMoveTree(startFen, games[0].moves);
+              root = buildMoveTree(startFen, games[0].items);
             }
           } else {
-            root = buildMoveTree(startFen, games[0].moves);
+            root = buildMoveTree(startFen, games[0].items);
           }
 
           this.mountViewer({
@@ -901,7 +899,7 @@ export default class ChessPlugin extends Plugin {
                   });
                   select.addEventListener("change", () => {
                     const gameIndex = parseInt(select.value, 10);
-                    const newRoot = buildMoveTree(startFen, games[gameIndex].moves);
+                    const newRoot = buildMoveTree(startFen, games[gameIndex].items);
                     getViewer().loadGame(newRoot, games[gameIndex].result, games[gameIndex].headers);
                   });
                 }

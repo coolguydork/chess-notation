@@ -30,10 +30,19 @@ describe("pgn-editor serialize", () => {
     roundTrips("1. e4 -- 2. Z0 e5 *");
   });
 
-  it("round-trips a comment that follows a variation (re-anchored before it)", () => {
-    // The comment attaches to e4's after-slot; serialization emits it before
-    // the variation, which re-parses to the identical AST.
+  it("round-trips a comment that follows a variation, in place", () => {
     roundTrips("1. e4 ( 1. d4 ) { hi } ( 1. c4 ) 1... e5 2. Nf3 *");
+  });
+
+  // Position is truth: for text already in canonical spacing, serialization
+  // reproduces it exactly — comments are never re-anchored, merged, or moved.
+  it.each([
+    "1. e4 ( 1. d4 ) { hi } 1... e5 2. Nf3 *",
+    "1. e4 { a } { b } 1... e5 *",
+    "{ intro } 1. { pre } e4 { after } 1... e5 *",
+    "1. e4 e5 ( 1... c6 ) { hi } *",
+  ])("emits the written text unchanged: %s", (pgn) => {
+    expect(serializeMovetext(parse(pgn))).toBe(pgn);
   });
 
   it("round-trips headers including FEN", () => {

@@ -60,34 +60,58 @@ export function buildHeaderHtml(headers: Record<string, string>): string {
 // ---------------------------------------------------------------------------
 
 export function buildMoveListHtml(root: MoveNode, currentId: number, result?: string, editable = false): string {
-  if (!root.next) return "";
+  if (!root.next && root.tail.length === 0) return "";
 
   const parts: string[] = [];
-  renderLine(root.next, currentId, parts, /* firstInLine */ true, editable);
+  // Comments written before the first move live in the root's tail.
+  renderTail(root, currentId, parts, editable);
+  if (root.next) renderLine(root.next, currentId, parts, /* firstInLine */ true, editable);
   if (result) parts.push(`<span class="chess-result">${result}</span>`);
 
   return `<div class="chess-move-list">${parts.join("")}</div>`;
 }
 
-// Render a sequence of linked nodes, inserting variation sub-trees inline.
-// needsMoveNumber: true at the start of any line and after a variation closes.
+// A standalone comment item. Block element, so it drops onto its own line.
+// `anchorActive` mirrors the active state of the move whose position the
+// comment sits at; the delete control follows the same rule as move deletes.
+function commentSpan(c: { id: number; text: string }, anchorActive: boolean, editable: boolean): string {
+  const active = anchorActive ? ` data-active="true"` : "";
+  const del = editable && anchorActive
+    ? `<button class="chess-delete-btn" data-comment-delete-id="${c.id}" title="Delete comment">×</button>`
+    : "";
+  return `<span class="chess-comment" data-comment-id="${c.id}"${active}>${escapeHtml(c.text)}${del}</span>`;
+}
+
+// Emit a node's tail — the comments and variations that followed it in the
+// text, in source order. Returns whether anything was emitted (the caller
+// re-shows the next move number after a break).
+function renderTail(node: MoveNode, currentId: number, out: string[], editable: boolean): boolean {
+  for (const entry of node.tail) {
+    if (entry.kind === "comment") {
+      out.push(commentSpan(entry.comment, node.id === currentId, editable));
+    } else {
+      out.push(`<span class="chess-variation">`);
+      out.push(`<span class="chess-variation-paren">(</span>`);
+      for (const leadComment of entry.lead) {
+        out.push(commentSpan(leadComment, entry.head.id === currentId, editable));
+      }
+      renderLine(entry.head, currentId, out, /* firstInLine */ true, editable);
+      out.push(`<span class="chess-variation-paren">)</span>`);
+      out.push(`</span>`);
+    }
+  }
+  return node.tail.length > 0;
+}
+
+// Render a sequence of linked nodes, inserting each node's tail (comments and
+// variation sub-trees) inline where the text had them.
+// needsMoveNumber: true at the start of any line and after a comment/variation.
 // editable: emit a delete control on the active move.
 function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveNumber: boolean, editable: boolean): void {
   let cur: MoveNode | null = head;
   let showNumber = needsMoveNumber;
 
   while (cur) {
-    // Before-move comment drops in ahead of the move number; force the number to
-    // re-show so the move that follows is still labelled.
-    if (cur.commentBefore) {
-      const activeAttr = cur.id === currentId ? ` data-active="true"` : "";
-      const del = editable && cur.id === currentId
-        ? `<button class="chess-delete-btn" data-comment-delete-id="${cur.id}" data-comment-delete-slot="before" title="Delete comment">×</button>`
-        : "";
-      out.push(`<span class="chess-comment" data-comment-id="${cur.id}" data-comment-slot="before"${activeAttr}>${escapeHtml(cur.commentBefore)}${del}</span>`);
-      showNumber = true;
-    }
-
     if (cur.color === "w" || showNumber) {
       const dots = cur.color === "w" ? "." : "…"; // "…" for black-to-move marker
       out.push(`<span class="chess-move-number">${cur.moveNumber}${dots}</span>`);
@@ -118,23 +142,9 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
       out.push(`<button class="chess-delete-btn" data-delete-id="${cur.id}" title="Delete from here">×</button>`);
     }
 
-    // Annotation comment — block element so it drops below the move line
-    if (cur.comment) {
-      const del = editable && cur.id === currentId
-        ? `<button class="chess-delete-btn" data-comment-delete-id="${cur.id}" data-comment-delete-slot="after" title="Delete comment">×</button>`
-        : "";
-      out.push(`<span class="chess-comment" data-comment-id="${cur.id}" data-comment-slot="after"${active}>${escapeHtml(cur.comment)}${del}</span>`);
-      showNumber = true; // re-show move number after a block comment
-    }
-
-    // Variation lines shown after this move (each branches from cur.parent)
-    for (const varHead of cur.variationHeads) {
-      out.push(`<span class="chess-variation">`);
-      out.push(`<span class="chess-variation-paren">(</span>`);
-      renderLine(varHead, currentId, out, /* firstInLine */ true, editable);
-      out.push(`<span class="chess-variation-paren">)</span>`);
-      out.push(`</span>`);
-      showNumber = true; // re-show move number after a variation closes
+    // Everything that followed this move in the text, in order.
+    if (renderTail(cur, currentId, out, editable)) {
+      showNumber = true; // a comment or variation breaks the run
     }
 
     cur = cur.next;

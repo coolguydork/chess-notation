@@ -1,10 +1,15 @@
 import { buildMoveListHtml, buildHeaderHtml } from "../render/controls";
-import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
-import { addMoveAt, removeAt, projectGame, promoteVariation, setComment, setNags } from "../core/game";
+import { findNodeById, findCommentById, nodeToPath, pathToNode } from "../core/tree";
+import {
+  addMoveAt, removeAt, projectGame, promoteVariation, setNags,
+  setMidComment, adjacentComment, setAdjacentComment, updateComment,
+} from "../core/game";
 import type { GameEditor } from "../core/game";
+import { cleanComment } from "../core/pgn";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
+import type { PgnComment } from "../pgn-editor";
 import type { BoardConfig, EngineArrow } from "../render/config";
 import type { PvMove } from "../core/engine";
 
@@ -24,15 +29,13 @@ interface PgnViewerState {
 
 export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
 
-// Render position of a move comment: "before" the move number (AST commentMove),
-// "mid" between the number and the SAN (AST commentBefore), or "after" the SAN
-// (AST commentAfter, the common case).
-export type CommentSlot = "before" | "mid" | "after";
-
-// Recover the slot from a rendered comment's data attribute ("after" fallback).
-function parseSlot(raw: string | undefined): CommentSlot {
-  return raw === "before" || raw === "mid" ? raw : "after";
-}
+// What a comment context-menu action operates on. Comments have no owning
+// move: a standalone "item" comment is addressed by identity (its AST item),
+// with `anchor` only naming the board position it sits at. The exception is
+// the mid comment ("1. { x } e4"), which lives inside a move's number–SAN unit.
+export type CommentTarget =
+  | { kind: "mid"; node: MoveNode }
+  | { kind: "item"; comment: PgnComment; text: string; anchor: MoveNode };
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -73,7 +76,7 @@ export class PgnViewer {
   // in plugin/; the viewer only detects the trigger and owns the edit ops).
   private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
   // Plugin-supplied handler that raises the per-comment context menu (edit / delete).
-  private commentMenuHandler: ((node: MoveNode, slot: CommentSlot, evt: MouseEvent) => void) | null = null;
+  private commentMenuHandler: ((target: CommentTarget, evt: MouseEvent) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -178,16 +181,24 @@ export class PgnViewer {
       }
       const commentDel = t.closest<HTMLElement>("[data-comment-delete-id]");
       if (commentDel) {
-        const n = findNodeById(this.state.root, Number(commentDel.dataset.commentDeleteId));
-        const slot = parseSlot(commentDel.dataset.commentDeleteSlot);
-        if (n) this.setCommentOn(n, "", slot);
+        const id = Number(commentDel.dataset.commentDeleteId);
+        if (commentDel.dataset.commentDeleteSlot === "mid") {
+          const n = findNodeById(this.state.root, id);
+          if (n) this.setMidCommentOn(n, "");
+        } else {
+          const found = findCommentById(this.state.root, id);
+          if (found) this.updateCommentOn(found.comment.source, "");
+        }
         return;
       }
-      // A comment belongs to its move — clicking it navigates there, just like
-      // clicking the move itself (the × above is handled first, so it still deletes).
-      const commentId = t.closest<HTMLElement>("[data-comment-id]")?.dataset.commentId;
-      if (commentId) {
-        const n = findNodeById(this.state.root, Number(commentId));
+      // A comment sits at a board position — clicking it navigates there (the
+      // × above is handled first, so it still deletes).
+      const commentEl = t.closest<HTMLElement>("[data-comment-id]");
+      if (commentEl) {
+        const id = Number(commentEl.dataset.commentId);
+        const n = commentEl.dataset.commentSlot === "mid"
+          ? findNodeById(this.state.root, id)
+          : findCommentById(this.state.root, id)?.anchor ?? null;
         if (n) this.goTo(n);
         return;
       }
@@ -208,11 +219,25 @@ export class PgnViewer {
       // nested inside move spans, so the two data attributes never collide.
       const commentEl = target.closest<HTMLElement>("[data-comment-id]");
       if (commentEl && this.commentMenuHandler) {
-        const node = findNodeById(this.state.root, Number(commentEl.dataset.commentId));
-        const slot = parseSlot(commentEl.dataset.commentSlot);
-        if (node) {
+        const id = Number(commentEl.dataset.commentId);
+        let menuTarget: CommentTarget | null = null;
+        if (commentEl.dataset.commentSlot === "mid") {
+          const node = findNodeById(this.state.root, id);
+          if (node) menuTarget = { kind: "mid", node };
+        } else {
+          const found = findCommentById(this.state.root, id);
+          if (found) {
+            menuTarget = {
+              kind: "item",
+              comment: found.comment.source,
+              text: found.comment.text,
+              anchor: found.anchor,
+            };
+          }
+        }
+        if (menuTarget) {
           e.preventDefault();
-          this.commentMenuHandler(node, slot, e);
+          this.commentMenuHandler(menuTarget, e);
           return;
         }
       }
@@ -289,7 +314,7 @@ export class PgnViewer {
   }
 
   // Register the handler that raises the per-comment context menu (plugin-supplied).
-  setCommentMenuHandler(fn: (node: MoveNode, slot: CommentSlot, evt: MouseEvent) => void): void {
+  setCommentMenuHandler(fn: (target: CommentTarget, evt: MouseEvent) => void): void {
     this.commentMenuHandler = fn;
   }
 
@@ -514,13 +539,35 @@ export class PgnViewer {
     this.refreshAfterEdit();
   }
 
-  // Set/clear a comment on `node` (empty string clears). `where` selects the
-  // render position (see CommentSlot); the slots map to the AST's commentMove /
-  // commentBefore / commentAfter respectively.
-  setCommentOn(node: MoveNode, text: string, where: CommentSlot = "after"): void {
+  // Set/clear the comment inside `node`'s number–SAN unit (empty string clears).
+  setMidCommentOn(node: MoveNode, text: string): void {
     if (!this.editor) return;
-    const field = where === "before" ? "commentMove" : where === "mid" ? "commentBefore" : "commentAfter";
-    setComment(this.editor, nodeToPath(node), field, text);
+    setMidComment(this.editor, nodeToPath(node), text);
+    this.refreshAfterEdit();
+  }
+
+  // Set/replace/clear the comment item directly adjacent to `node` in the
+  // stream (empty string clears). This is the authoring path: "write a comment
+  // right before/after this move" — position chosen by the user, no ownership.
+  setAdjacentCommentOn(node: MoveNode, side: "before" | "after", text: string): void {
+    if (!this.editor) return;
+    setAdjacentComment(this.editor, nodeToPath(node), side, text);
+    this.refreshAfterEdit();
+  }
+
+  // Display text of the comment item directly adjacent to `node` ("" if none) —
+  // used to seed the comment modal so authoring edits in place.
+  adjacentCommentTextOf(node: MoveNode, side: "before" | "after"): string {
+    if (!this.editor) return "";
+    const item = adjacentComment(this.editor, nodeToPath(node), side);
+    return item ? cleanComment(item.text) : "";
+  }
+
+  // Replace the text of an existing comment item (addressed by identity);
+  // empty string removes it.
+  updateCommentOn(comment: PgnComment, text: string): void {
+    if (!this.editor) return;
+    updateComment(this.editor, comment, text);
     this.refreshAfterEdit();
   }
 

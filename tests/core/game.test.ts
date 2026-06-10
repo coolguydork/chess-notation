@@ -6,17 +6,27 @@ import {
   gameToPgn,
   addMoveAt,
   removeAt,
-  setComment,
+  setMidComment,
+  setAdjacentComment,
+  updateComment,
   setNags,
   promoteVariation,
   replaceMove,
 } from "../../src/core/game";
 import { buildMoveTree } from "../../src/core/tree";
-import { parseMultiPGN, serializeMoveTree } from "../../src/core/pgn";
+import { parseMultiPGN } from "../../src/core/pgn";
 import { serializeFEN } from "../../src/core/fen";
+import { isComment } from "../../src/pgn-editor";
 import type { MoveNode } from "../../src/core/types";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+// Display comments following a node, in order.
+function tailComments(node: MoveNode): string[] {
+  return node.tail
+    .filter((t): t is Extract<typeof t, { kind: "comment" }> => t.kind === "comment")
+    .map((t) => t.comment.text);
+}
 
 // Compare two MoveNode trees for structural equivalence (ignoring node ids).
 function expectTreesEqual(a: MoveNode | null, b: MoveNode | null, path = "root"): void {
@@ -27,7 +37,8 @@ function expectTreesEqual(a: MoveNode | null, b: MoveNode | null, path = "root")
   expect(a.san, `san at ${path}`).toBe(b.san);
   expect(a.moveNumber, `moveNumber at ${path}`).toBe(b.moveNumber);
   expect(a.color, `color at ${path}`).toBe(b.color);
-  expect(a.comment ?? undefined, `comment at ${path}`).toBe(b.comment ?? undefined);
+  expect(a.commentMid ?? undefined, `commentMid at ${path}`).toBe(b.commentMid ?? undefined);
+  expect(tailComments(a), `tail comments at ${path}`).toEqual(tailComments(b));
   expect(a.nags ?? undefined, `nags at ${path}`).toEqual(b.nags ?? undefined);
   expect(serializeFEN(a.state), `state at ${path}`).toBe(serializeFEN(b.state));
   expect(a.from, `from at ${path}`).toBe(b.from);
@@ -40,7 +51,7 @@ function expectTreesEqual(a: MoveNode | null, b: MoveNode | null, path = "root")
 // Build the same tree via the other entry path (parseMultiPGN -> buildMoveTree),
 // a cross-path consistency check that gameFromPgn -> projectGame agrees with it.
 function viaLib(movetext: string, startFen = START_FEN): MoveNode {
-  return buildMoveTree(startFen, parseMultiPGN(`${movetext} *`)[0].moves);
+  return buildMoveTree(startFen, parseMultiPGN(`${movetext} *`)[0].items);
 }
 
 describe("projectGame — parity with buildMoveTree", () => {
@@ -119,6 +130,12 @@ describe("addMoveAt", () => {
     expect(root.next!.next!.variationHeads).toHaveLength(0);
   });
 
+  it("branches after the continuation's own comment, not before it", () => {
+    const ed = gameFromPgn("1. e4 e5 { solid } 2. Nf3");
+    addMoveAt(ed, ["e4"], "c5");
+    expect(gameToPgn(ed, "*")).toBe("1. e4 e5 { solid } ( 1... c5 ) 2. Nf3 *");
+  });
+
   it("adds a pawn promotion (restored after dropping cm-chess)", () => {
     const ed = gameFromFen("8/4P3/8/8/8/8/8/4K2k w - - 0 1");
     addMoveAt(ed, [], "e8=Q");
@@ -161,11 +178,9 @@ describe("removeAt", () => {
 });
 
 describe("gameToPgn", () => {
-  it("round-trips movetext with NAGs and comments", () => {
-    const movetext = "1. e4 e5 2. Nf3 Nc6 $1 3. Bb5 {Ruy Lopez} a6";
-    expect(gameToPgn(gameFromPgn(movetext), "*")).toBe(
-      serializeMoveTree(viaLib(movetext), "*"),
-    );
+  it("round-trips movetext with NAGs and comments in canonical form", () => {
+    const ed = gameFromPgn("1. e4 e5 2. Nf3 Nc6 $1 3. Bb5 {Ruy Lopez} a6");
+    expect(gameToPgn(ed, "*")).toBe("1. e4 e5 2. Nf3 Nc6 $1 3. Bb5 { Ruy Lopez } 3... a6 *");
   });
 
   it("preserves header tags on write-back, on a single line", () => {
@@ -181,41 +196,47 @@ describe("gameToPgn", () => {
     expect(gameToPgn(gameFromPgn("3. Bb5 a6", fen), "*")).toBe("3. Bb5 a6 *");
   });
 
-  // The projection (astToPgnMoves) collapses to a single comment slot, so
-  // commentMove/commentBefore used to be silently dropped on write-back. Now
-  // gameToPgn serializes the AST directly and preserves all three positions.
-  it("preserves a before-the-number comment (commentMove) on write-back", () => {
+  it("writes back a comment inserted before the first move", () => {
     const ed = gameFromPgn("1. e4 e5");
-    setComment(ed, ["e4"], "commentMove", "intro");
-    expect(gameToPgn(ed, "*")).toContain("{ intro }");
+    setAdjacentComment(ed, ["e4"], "before", "intro");
+    expect(gameToPgn(ed, "*")).toBe("{ intro } 1. e4 e5 *");
   });
 
-  it("preserves a between-number-and-SAN comment (commentBefore) on write-back", () => {
+  it("writes back a between-number-and-SAN comment (commentMid)", () => {
     const ed = gameFromPgn("1. e4 e5");
-    setComment(ed, ["e4"], "commentBefore", "hmm");
-    expect(gameToPgn(ed, "*")).toContain("{ hmm }");
+    setMidComment(ed, ["e4"], "hmm");
+    expect(gameToPgn(ed, "*")).toBe("1. { hmm } e4 e5 *");
   });
 
-  it("round-trips all three comment positions through serialize -> parse", () => {
+  it("round-trips every comment position through serialize -> parse", () => {
     const ed = gameFromPgn("{ intro } 1. { hmm } e4 { ok } e5");
-    const reparsed = gameFromPgn(gameToPgn(ed, "*")).moves;
-    expect(reparsed[0].commentMove).toBe("intro");
-    expect(reparsed[0].commentBefore).toBe("hmm");
-    expect(reparsed[0].commentAfter).toBe("ok");
+    const reparsed = gameFromPgn(gameToPgn(ed, "*")).items;
+    expect(reparsed[0]).toMatchObject({ kind: "comment", text: "intro" });
+    expect(reparsed[1]).toMatchObject({ kind: "move", san: "e4", commentMid: "hmm" });
+    expect(reparsed[2]).toMatchObject({ kind: "comment", text: "ok" });
   });
 
-  it("projects a before-move comment (commentMove) onto the MoveNode", () => {
+  it("projects a leading comment into the root's tail", () => {
     const ed = gameFromPgn("{ intro } 1. e4 e5");
-    expect(projectGame(ed).next!.commentBefore).toBe("intro");
+    expect(tailComments(projectGame(ed))).toEqual(["intro"]);
   });
 });
 
 describe("move-level Update (Tier 1 seam)", () => {
-  it("setComment (after) reaches the projected tree and the PGN", () => {
+  it("setAdjacentComment (after) reaches the projected tree and the PGN", () => {
     const ed = gameFromPgn("1. e4 e5 2. Nf3");
-    expect(setComment(ed, ["e4"], "commentAfter", "best by test")).toBe(true);
-    expect(projectGame(ed).next!.comment).toBe("best by test");
+    expect(setAdjacentComment(ed, ["e4"], "after", "best by test")).toBe(true);
+    expect(tailComments(projectGame(ed).next!)).toEqual(["best by test"]);
     expect(gameToPgn(ed, "*")).toContain("{ best by test }");
+  });
+
+  it("updateComment edits an existing comment item by identity", () => {
+    const ed = gameFromPgn("1. e4 { old } e5");
+    const item = ed.items.find(isComment)!;
+    expect(updateComment(ed, item, "new")).toBe(true);
+    expect(gameToPgn(ed, "*")).toBe("1. e4 { new } 1... e5 *");
+    expect(updateComment(ed, item, "")).toBe(true);
+    expect(gameToPgn(ed, "*")).toBe("1. e4 e5 *");
   });
 
   it("setNags annotates a move", () => {
