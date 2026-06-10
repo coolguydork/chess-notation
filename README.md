@@ -14,7 +14,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 | **Edit games in place** | Play a move on the board to extend the line or branch a variation. Right-click any move to add comments, annotation glyphs (`!`, `?`, `!!`…), delete from that point, or promote a variation to the main line. Edits are **written back to the note**. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
-| **Engine analysis** | An analysis panel (shown by default) powered by any UCI engine — Stockfish is auto-discovered. Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
+| **Engine analysis** | An analysis panel powered by any UCI engine — Stockfish is auto-discovered, and the panel appears automatically whenever an engine is found. Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
 | **Board orientation** | Flip any board to Black's perspective with `orientation: black`, or with the flip (⇆) button. |
 | **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
@@ -87,12 +87,12 @@ pgn: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 ```
 ````
 
-**Analyze a position with Stockfish:**
+**Analyze a position** (the analysis panel appears automatically when a UCI
+engine such as Stockfish is installed — see [Engine analysis](#engine-analysis)):
 
 ````markdown
 ```chess
 fen: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
-analysis: true
 ```
 ````
 
@@ -145,7 +145,7 @@ Renders a game viewer with previous/next navigation buttons and a clickable move
 | `pgn` | string | — | PGN string (required if no `fen`) |
 | `orientation` | `white` \| `black` | `white` | Board orientation |
 | `theme` | string | plugin setting | Board color theme |
-| `analysis` | boolean | `true` | Show the Stockfish analysis panel (set `false` to hide) |
+| `analysis` | boolean | *auto* | Show the engine analysis panel. By default it appears when a UCI engine is detected (desktop only) and stays hidden otherwise; set `true`/`false` to override. |
 
 The PGN parser and viewer handle:
 - Standard algebraic notation for all piece moves, captures, castling, en passant, and promotion
@@ -210,7 +210,12 @@ pgn: 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 
 ### Analysis blocks
 
-The engine analysis panel is shown **by default** on every block — there's nothing to add. To hide it, set `analysis: false`.
+The engine analysis panel is shown **automatically** on every block when a UCI
+engine is detected — there's nothing to add. Without an engine (and always on
+mobile, where engine analysis is unsupported) the panel stays hidden, so the
+same note renders a clean board everywhere. Set `analysis: false` to hide the
+panel even with an engine present, or `analysis: true` to force it on a system
+where detection failed.
 
 ````markdown
 ```chess

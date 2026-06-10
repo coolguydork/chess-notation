@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, Menu, Modal, MarkdownView, Editor, Notice } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, Menu, Modal, MarkdownView, Editor, Notice, Platform } from "obsidian";
 import { load as parseYaml } from "js-yaml";
 import { parseMultiPGN } from "../core/pgn";
 import { uciSquareToIndex } from "../core/fen";
@@ -16,7 +16,7 @@ import {
 } from "../render/config";
 import { scoreToString, uciPvToSan } from "../core/engine";
 import type { UciOptionDef, PvMove } from "../core/engine";
-import { EngineWorker } from "./engine-worker";
+import { EngineWorker, probeEngineAvailable } from "./engine-worker";
 import type { BoardState, MoveNode, PgnGame } from "../core/types";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -61,7 +61,7 @@ interface ChessBlockParams {
   analysis?: boolean;
 }
 
-function parseBlock(source: string): ChessBlockParams {
+export function parseBlock(source: string): ChessBlockParams {
   let raw: unknown;
   try {
     raw = parseYaml(source);
@@ -107,7 +107,9 @@ function parseBlock(source: string): ChessBlockParams {
     params.theme = parsed.theme;
   }
 
-  params.analysis = "analysis" in parsed ? Boolean(parsed.analysis) : true;
+  // Tri-state: explicit true/false always wins; an absent key means auto —
+  // the panel is mounted only when an engine is detected (mountAnalysisWhenAvailable).
+  if ("analysis" in parsed) params.analysis = Boolean(parsed.analysis);
 
   if (!params.fen && !params.pgn) {
     params.fen = STARTING_FEN;
@@ -710,6 +712,36 @@ export default class ChessPlugin extends Plugin {
   settings!: ChessPluginSettings;
   private engineWorker: EngineWorker | null = null;
 
+  // Probes spawn real engine processes; injectable so tests stay hermetic.
+  engineProbe: (path?: string) => Promise<boolean> = probeEngineAvailable;
+  private engineAvailability: { key: string; result: Promise<boolean> } | null = null;
+
+  /** Whether a UCI engine is reachable. Probed once per enginePath value. */
+  engineAvailable(): Promise<boolean> {
+    const key = this.settings.enginePath;
+    if (!this.engineAvailability || this.engineAvailability.key !== key) {
+      this.engineAvailability = { key, result: this.engineProbe(key || undefined) };
+    }
+    return this.engineAvailability.result;
+  }
+
+  /**
+   * Gate an analysis-panel mount on the block's `analysis` key: explicit
+   * true/false always wins; an absent key means auto — mount only once a UCI
+   * engine is known to be reachable. Mobile never mounts (no child_process),
+   * so the same note renders a clean board on the phone.
+   */
+  mountAnalysisWhenAvailable(analysis: boolean | undefined, mount: () => void): void {
+    if (Platform.isMobile || analysis === false) return;
+    if (analysis === true) {
+      mount();
+      return;
+    }
+    void this.engineAvailable().then((ok) => {
+      if (ok) mount();
+    });
+  }
+
   getEngineWorker(): EngineWorker {
     const optionsKey = JSON.stringify(this.settings.engineUserOptions);
     if (
@@ -844,7 +876,7 @@ export default class ChessPlugin extends Plugin {
               if (e.reason === "load-game") analysisFenReset?.();
             });
 
-            if (params.analysis) {
+            this.mountAnalysisWhenAvailable(params.analysis, () => {
               const { reset } = mountAnalysisPanel(
                 outerContainer,
                 () => viewer.getCurrentState(),
@@ -859,7 +891,7 @@ export default class ChessPlugin extends Plugin {
                 () => viewer.endEnginePreview(),
               );
               analysisFenReset = reset;
-            }
+            });
 
             ctx.addChild(new PgnViewerChild(el, viewer));
             return;
@@ -953,7 +985,7 @@ export default class ChessPlugin extends Plugin {
             if (e.reason === "load-game") analysisReset?.();
           });
 
-          if (params.analysis) {
+          this.mountAnalysisWhenAvailable(params.analysis, () => {
             const { reset } = mountAnalysisPanel(
               outerContainer,
               () => viewer.getCurrentState(),
@@ -968,7 +1000,7 @@ export default class ChessPlugin extends Plugin {
               () => viewer.endEnginePreview(),
             );
             analysisReset = reset;
-          }
+          });
 
           ctx.addChild(new PgnViewerChild(el, viewer));
         } catch (err) {

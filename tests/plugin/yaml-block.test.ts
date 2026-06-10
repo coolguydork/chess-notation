@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { load as parseYaml } from "js-yaml";
 import { yamlInlineScalar, buildChessBlock, replacePgnValue } from "../../src/plugin/yaml-block";
+import { parseBlock } from "../../src/plugin/main";
 
 // Round-trip invariant: whatever yamlInlineScalar produces, parsing
 // `pgn: <scalar>` back as YAML must yield the original string. This is the
@@ -144,5 +145,26 @@ describe("replacePgnValue", () => {
     const { found, lines } = rewrite(["```chess", "fen: abc", "```"], "1. e4 *");
     expect(found).toBe(false);
     expect(lines).toEqual(["```chess", "fen: abc", "```"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseBlock `analysis` key (tri-state: true / false / absent = auto)
+// ---------------------------------------------------------------------------
+
+describe("parseBlock analysis key", () => {
+  it("leaves analysis undefined when the key is absent (auto)", () => {
+    const params = parseBlock("fen: 8/8/8/8/8/8/8/8 w - - 0 1");
+    expect(params.analysis).toBeUndefined();
+  });
+
+  it("parses explicit analysis: true", () => {
+    const params = parseBlock("fen: 8/8/8/8/8/8/8/8 w - - 0 1\nanalysis: true");
+    expect(params.analysis).toBe(true);
+  });
+
+  it("parses explicit analysis: false", () => {
+    const params = parseBlock("fen: 8/8/8/8/8/8/8/8 w - - 0 1\nanalysis: false");
+    expect(params.analysis).toBe(false);
   });
 });

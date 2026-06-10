@@ -64,7 +64,7 @@ The block body is YAML. Supported keys:
 - `pgn` — PGN string (required if no `fen`)
 - `orientation` — `white` | `black` (default: `white`)
 - `theme` — board color theme name (default: plugin setting); see themes below
-- `analysis` — show the engine analysis panel (default: `true`; set to `false` to hide)
+- `analysis` — show the engine analysis panel (default: auto — shown when a UCI engine is detected, hidden otherwise and always on mobile; explicit `true`/`false` overrides)
 
 `fen` and `pgn` may be combined: `fen` sets the starting position, `pgn`
 provides the move list to navigate.
@@ -185,7 +185,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (415 tests across 19 suites)
+npm test           # vitest unit tests (431 tests across 19 suites)
 npm run dev        # watch mode
 ```
 

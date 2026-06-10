@@ -134,6 +134,20 @@ async function findDiscoveredBinary(
   return null;
 }
 
+/**
+ * Check whether a usable UCI engine is reachable — the explicit path when
+ * configured, otherwise the auto-discovery candidates. Used to decide whether
+ * analysis panels are shown by default; spawns only a short-lived probe, never
+ * the persistent process.
+ */
+export async function probeEngineAvailable(
+  explicitPath?: string,
+  spawnFn: (binaryPath: string) => ChildProcess = defaultSpawn
+): Promise<boolean> {
+  if (explicitPath) return probeUciBinary(explicitPath, spawnFn);
+  return (await findDiscoveredBinary(spawnFn)) !== null;
+}
+
 function defaultSpawn(binaryPath: string): ChildProcess {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { spawn } = (globalThis as any).require("child_process") as typeof import("child_process");

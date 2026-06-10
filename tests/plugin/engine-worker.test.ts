@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildSetOptionCommands,
   collectAnalysis,
+  probeEngineAvailable,
   EngineWorker,
   type ChildProcess,
   type EngineWorkerConfig,
@@ -112,6 +113,8 @@ class FakeEngine implements ChildProcess {
   onGo: (() => void) | null = null;
   /** Override the response to `isready` (e.g. an engine that dies loading weights). */
   onIsReady: (() => void) | null = null;
+  /** Override the response to `uci` (e.g. a binary that isn't a UCI engine). */
+  onUci: (() => void) | null = null;
   private stdoutCb: ((chunk: Buffer | string) => void) | null = null;
   private stderrCb: ((chunk: Buffer | string) => void) | null = null;
   private closeCb: ((...args: unknown[]) => void) | null = null;
@@ -170,6 +173,10 @@ class FakeEngine implements ChildProcess {
 
   private respond(cmd: string): void {
     if (cmd === "uci") {
+      if (this.onUci) {
+        this.onUci();
+        return;
+      }
       this.emit("id name FakeEngine 1.0");
       this.emit("option name MultiPV type spin default 1 min 1 max 500");
       this.emit("option name Threads type spin default 1 min 1 max 512");
@@ -205,6 +212,44 @@ function makeWorker(
   });
   return { worker, procs, spawnFn };
 }
+
+describe("probeEngineAvailable", () => {
+  it("probes the explicit path and resolves true on uciok", async () => {
+    const procs: FakeEngine[] = [];
+    const spawnFn = vi.fn((_p: string): ChildProcess => {
+      const proc = new FakeEngine();
+      procs.push(proc);
+      return proc;
+    });
+    await expect(probeEngineAvailable("/fake/lc0", spawnFn)).resolves.toBe(true);
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(spawnFn).toHaveBeenCalledWith("/fake/lc0");
+    expect(procs[0].killed).toBe(true); // the probe cleans up after itself
+  });
+
+  it("resolves false when the binary exits without uciok", async () => {
+    const spawnFn = vi.fn((_p: string): ChildProcess => {
+      const proc = new FakeEngine();
+      proc.onUci = () => proc.emitClose();
+      return proc;
+    });
+    await expect(probeEngineAvailable("/fake/not-an-engine", spawnFn)).resolves.toBe(false);
+  });
+
+  it("walks the auto-discovery candidates when no path is given", async () => {
+    const spawnFn = vi.fn((_p: string): ChildProcess => new FakeEngine());
+    await expect(probeEngineAvailable(undefined, spawnFn)).resolves.toBe(true);
+    expect(spawnFn.mock.calls[0][0]).toBe("/usr/local/bin/stockfish");
+  });
+
+  it("resolves false when no candidate can be spawned", async () => {
+    const spawnFn = vi.fn((_p: string): ChildProcess => {
+      throw new Error("ENOENT");
+    });
+    await expect(probeEngineAvailable(undefined, spawnFn)).resolves.toBe(false);
+    expect(spawnFn.mock.calls.length).toBeGreaterThan(1); // tried every candidate
+  });
+});
 
 describe("EngineWorker", () => {
   const state = parseFEN(STARTING_FEN);
