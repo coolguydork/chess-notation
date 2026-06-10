@@ -430,6 +430,31 @@ describe("buildMoveListHtml", () => {
       expect(html).toContain("1…"); // black-to-move marker re-shown after the comment
     });
 
+    it("renders a mid comment between the move number and the move", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", commentMid: "sharpest" },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = buildMoveListHtml(r, r.id);
+      const numberPos = html.indexOf("1.");
+      const commentPos = html.indexOf("sharpest");
+      const e4Pos = html.indexOf(">e4<");
+      expect(commentPos).toBeGreaterThan(numberPos);
+      expect(commentPos).toBeLessThan(e4Pos);
+      expect(html).toContain(`data-comment-slot="mid"`);
+    });
+
+    it("does not re-show the move number after a mid comment", () => {
+      const moves: PgnMove[] = [
+        { san: "e4", moveNumber: 1, color: "w", commentMid: "hmm" },
+        { san: "e5", moveNumber: 1, color: "b" },
+      ];
+      const r = buildMoveTree(STARTING_FEN, moves);
+      const html = buildMoveListHtml(r, r.id);
+      expect(html).not.toContain("1…"); // e5 follows without a black-to-move marker
+    });
+
     it("renders comment after NAGs when both are present", () => {
       const moves: PgnMove[] = [
         { san: "e4", moveNumber: 1, color: "w", nags: [1], comment: "Strong move" },

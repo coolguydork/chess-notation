@@ -64,8 +64,8 @@ export function projectGame(editor: GameEditor): MoveNode {
 // Serialize the AST to a single-line PGN (header tags + movetext + result, no
 // blank-line separator) so the whole game fits the one YAML `pgn:` line that
 // write-back rewrites. Going through the AST rather than the projected MoveNode
-// tree preserves the header tags and all three comment positions; the
-// projection (astToPgnMoves) keeps neither headers nor commentMove/Before.
+// tree preserves the header tags and the raw comment text; the projection
+// keeps no headers and cleans comments (strips [%clk]/[%eval] annotations).
 export function gameToPgn(editor: GameEditor, result: string): string {
   return serializeInline({ headers: editor.headers, moves: editor.moves, result });
 }
@@ -121,8 +121,8 @@ export function removeAt(editor: GameEditor, path: string[]): void {
 
 // Set/clear a comment on the move at `path`. `field` selects the slot
 // (commentAfter is the common case). All three slots round-trip through
-// gameToPgn now (serializeMovetext walks the AST); only commentAfter is shown
-// in the rendered MoveNode tree, since the projection keeps a single slot.
+// gameToPgn (serializeMovetext walks the AST) and all three render in the
+// projected MoveNode tree (as commentBefore / commentMid / comment).
 // Returns whether the move was found.
 export function setComment(
   editor: GameEditor,

@@ -14,17 +14,18 @@ export function cleanComment(raw: string): string {
   return raw.replace(/\[%[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
 }
 
-// AST move nodes -> our PgnMove[]. The before-move comment maps from the AST's
-// commentMove (rendered before the move); the after-move comment from
-// commentAfter. The AST's middle commentBefore slot (between number and SAN) is
-// rarely used and not projected — it still round-trips via the AST serializer.
-// All comment text passes through cleanComment; NAGs and nested variations carry
-// across recursively.
+// AST move nodes -> our PgnMove[]. All three comment slots project: the AST's
+// commentMove (before the move number) maps to commentBefore, the AST's middle
+// commentBefore (between number and SAN — note the name shift) to commentMid,
+// and commentAfter to comment. All comment text passes through cleanComment;
+// NAGs and nested variations carry across recursively.
 export function astToPgnMoves(nodes: PgnNode[]): PgnMove[] {
   return nodes.map((n) => {
     const move: PgnMove = { san: n.san, moveNumber: n.moveNumber, color: n.color };
     const before = n.commentMove ? cleanComment(n.commentMove) : "";
     if (before) move.commentBefore = before;
+    const mid = n.commentBefore ? cleanComment(n.commentBefore) : "";
+    if (mid) move.commentMid = mid;
     const comment = n.commentAfter ? cleanComment(n.commentAfter) : "";
     if (comment) move.comment = comment;
     if (n.nags.length) move.nags = n.nags;

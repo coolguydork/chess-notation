@@ -143,6 +143,15 @@ describe("parsePGN", () => {
       expect(game.moves[0].comment).toBeUndefined();
     });
 
+    it("projects a between-number-and-move comment to commentMid", () => {
+      // A comment between the move number and the SAN is the AST's commentBefore
+      // (the rare middle slot), surfaced as commentMid on the move.
+      const game = parsePGN("1. { sharpest } e4 e5 *");
+      expect(game.moves[0].commentMid).toBe("sharpest");
+      expect(game.moves[0].commentBefore).toBeUndefined();
+      expect(game.moves[0].comment).toBeUndefined();
+    });
+
     it("absorbs consecutive comments into the preceding move's after-slot", () => {
       // PGN can't unambiguously split a comment between "after move A" and
       // "before move B": both attach to A. commentBefore is produced only for a

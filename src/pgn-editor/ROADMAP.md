@@ -38,8 +38,10 @@ traversal `childrenOf`/`resolvePath`/`nodeAt`); exposed through `core/game.ts`'s
 **Comment write-back fidelity ✅** — `gameToPgn` now serializes the AST directly
 via pgn-editor's `serializeMovetext()` (movetext-only; write-back targets a single
 YAML `pgn:` line, so no headers), so all three comment positions round-trip on
-save. The projected `MoveNode` tree still carries one comment slot, so only
-`commentAfter` is *rendered* — that's a display concern, not a persistence one.
+save. **Comment rendering ✅** — all three slots also project into the `MoveNode`
+tree and render in the viewer (`commentMove` → `commentBefore`, the middle
+`commentBefore` → `commentMid`, `commentAfter` → `comment`), each editable via
+the per-comment context menu.
 
 ## Tier 2 — Multi-game ✅ DONE (last GPL dependency removed)
 - `parseGames(text): PgnGameAst[]` ✓ in `parseGames.ts` — a comment/variation-aware

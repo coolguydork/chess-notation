@@ -95,6 +95,16 @@ function renderLine(head: MoveNode, currentId: number, out: string[], needsMoveN
     }
 
     const active = cur.id === currentId ? ` data-active="true"` : "";
+
+    // Mid comment sits between the number and the move token (the PGN's rare
+    // "1. {…} e4" slot); inline, so no move-number re-show needed.
+    if (cur.commentMid) {
+      const del = editable && cur.id === currentId
+        ? `<button class="chess-delete-btn" data-comment-delete-id="${cur.id}" data-comment-delete-slot="mid" title="Delete comment">×</button>`
+        : "";
+      out.push(`<span class="chess-comment" data-comment-id="${cur.id}" data-comment-slot="mid"${active}>${escapeHtml(cur.commentMid)}${del}</span>`);
+    }
+
     out.push(`<span class="chess-move" data-node-id="${cur.id}"${active}>${cur.san}</span>`);
 
     // NAG glyphs inline right after the move token (!, ?, !?, etc.)

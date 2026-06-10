@@ -24,6 +24,16 @@ interface PgnViewerState {
 
 export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
 
+// Render position of a move comment: "before" the move number (AST commentMove),
+// "mid" between the number and the SAN (AST commentBefore), or "after" the SAN
+// (AST commentAfter, the common case).
+export type CommentSlot = "before" | "mid" | "after";
+
+// Recover the slot from a rendered comment's data attribute ("after" fallback).
+function parseSlot(raw: string | undefined): CommentSlot {
+  return raw === "before" || raw === "mid" ? raw : "after";
+}
+
 export interface ChangeEvent {
   current: MoveNode;
   root: MoveNode;
@@ -63,7 +73,7 @@ export class PgnViewer {
   // in plugin/; the viewer only detects the trigger and owns the edit ops).
   private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
   // Plugin-supplied handler that raises the per-comment context menu (edit / delete).
-  private commentMenuHandler: ((node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void) | null = null;
+  private commentMenuHandler: ((node: MoveNode, slot: CommentSlot, evt: MouseEvent) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -169,7 +179,7 @@ export class PgnViewer {
       const commentDel = t.closest<HTMLElement>("[data-comment-delete-id]");
       if (commentDel) {
         const n = findNodeById(this.state.root, Number(commentDel.dataset.commentDeleteId));
-        const slot = commentDel.dataset.commentDeleteSlot === "before" ? "before" : "after";
+        const slot = parseSlot(commentDel.dataset.commentDeleteSlot);
         if (n) this.setCommentOn(n, "", slot);
         return;
       }
@@ -199,7 +209,7 @@ export class PgnViewer {
       const commentEl = target.closest<HTMLElement>("[data-comment-id]");
       if (commentEl && this.commentMenuHandler) {
         const node = findNodeById(this.state.root, Number(commentEl.dataset.commentId));
-        const slot = commentEl.dataset.commentSlot === "before" ? "before" : "after";
+        const slot = parseSlot(commentEl.dataset.commentSlot);
         if (node) {
           e.preventDefault();
           this.commentMenuHandler(node, slot, e);
@@ -279,7 +289,7 @@ export class PgnViewer {
   }
 
   // Register the handler that raises the per-comment context menu (plugin-supplied).
-  setCommentMenuHandler(fn: (node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void): void {
+  setCommentMenuHandler(fn: (node: MoveNode, slot: CommentSlot, evt: MouseEvent) => void): void {
     this.commentMenuHandler = fn;
   }
 
@@ -505,11 +515,11 @@ export class PgnViewer {
   }
 
   // Set/clear a comment on `node` (empty string clears). `where` selects the
-  // render position: "after" the move (default) or "before" it. These map to the
-  // AST's commentAfter / commentMove slots.
-  setCommentOn(node: MoveNode, text: string, where: "before" | "after" = "after"): void {
+  // render position (see CommentSlot); the slots map to the AST's commentMove /
+  // commentBefore / commentAfter respectively.
+  setCommentOn(node: MoveNode, text: string, where: CommentSlot = "after"): void {
     if (!this.editor) return;
-    const field = where === "before" ? "commentMove" : "commentAfter";
+    const field = where === "before" ? "commentMove" : where === "mid" ? "commentBefore" : "commentAfter";
     setComment(this.editor, nodeToPath(node), field, text);
     this.refreshAfterEdit();
   }

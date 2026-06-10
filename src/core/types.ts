@@ -47,6 +47,9 @@ export interface PgnMove {
   // Comment rendered *before* this move (the PGN pre-move comment — the AST's
   // `commentMove` slot). Distinct from `comment`, which is the after-move text.
   commentBefore?: string;
+  // Comment rendered between the move number and the SAN (the AST's rare
+  // middle `commentBefore` slot — note the name shift across the boundary).
+  commentMid?: string;
   comment?: string;
   nags?: number[];
   variations?: PgnMove[][];
@@ -68,6 +71,7 @@ export interface MoveNode {
   moveNumber: number;         // 0 for root
   color: Color | null;        // null for root
   commentBefore?: string;     // comment rendered before the move (AST commentMove)
+  commentMid?: string;        // comment between number and SAN (AST commentBefore)
   comment?: string;           // comment rendered after the move (AST commentAfter)
   nags?: number[];
   state: BoardState;

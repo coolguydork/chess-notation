@@ -21,7 +21,8 @@ function makeNode(
   parent: MoveNode | null,
   comment?: string,
   nags?: number[],
-  commentBefore?: string
+  commentBefore?: string,
+  commentMid?: string
 ): MoveNode {
   return {
     id: _idCounter++,
@@ -29,6 +30,7 @@ function makeNode(
     moveNumber,
     color,
     commentBefore,
+    commentMid,
     comment,
     nags: nags?.length ? nags : undefined,
     state,
@@ -45,7 +47,7 @@ function buildLine(parentNode: MoveNode, pgnMoves: PgnMove[]): void {
   let cur = parentNode;
   for (const m of pgnMoves) {
     const result = applyMoveEx(cur.state, m.san);
-    const node = makeNode(m.san, m.moveNumber, m.color, result.state, result.from, result.to, cur, m.comment, m.nags, m.commentBefore);
+    const node = makeNode(m.san, m.moveNumber, m.color, result.state, result.from, result.to, cur, m.comment, m.nags, m.commentBefore, m.commentMid);
     cur.next = node;
 
     // m.variations are alternatives to m — they branch from cur (m's parent).
@@ -68,7 +70,7 @@ function attachVariation(parentNode: MoveNode, varPgn: PgnMove[], precedingNode:
   const firstNode = makeNode(
     first.san, first.moveNumber, first.color,
     firstResult.state, firstResult.from, firstResult.to,
-    parentNode, first.comment, first.nags, first.commentBefore
+    parentNode, first.comment, first.nags, first.commentBefore, first.commentMid
   );
   precedingNode.variationHeads.push(firstNode);
 

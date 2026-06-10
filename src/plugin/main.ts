@@ -6,6 +6,7 @@ import { gameFromFen, gameFromPgn, projectGame, gameToPgn } from "../core/game";
 import type { GameEditor } from "../core/game";
 import { yamlInlineScalar, buildChessBlock, replacePgnValue } from "./yaml-block";
 import { PgnViewer } from "../view/pgn-viewer";
+import type { CommentSlot } from "../view/pgn-viewer";
 import { mountAnalysisPanel } from "../view/analysis-panel";
 import {
   DEFAULT_BOARD_CONFIG,
@@ -187,11 +188,17 @@ function showCommentMenu(
   app: App,
   viewer: PgnViewer,
   node: MoveNode,
-  slot: "before" | "after",
+  slot: CommentSlot,
   evt: MouseEvent,
 ): void {
-  const current = slot === "before" ? node.commentBefore ?? "" : node.comment ?? "";
-  const title = slot === "before" ? "Comment before move" : "Comment after move";
+  const current =
+    slot === "before" ? node.commentBefore ?? ""
+    : slot === "mid" ? node.commentMid ?? ""
+    : node.comment ?? "";
+  const title =
+    slot === "before" ? "Comment before move"
+    : slot === "mid" ? "Comment between number and move"
+    : "Comment after move";
 
   const menu = new Menu();
   menu.addItem((i) =>
