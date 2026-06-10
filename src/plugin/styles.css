@@ -37,22 +37,8 @@
   touch-action: manipulation; /* prevents 300ms tap delay on mobile */
 }
 
-.chess-board-svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
 .chess-board-wrapper {
   position: relative;
-}
-
-.chess-piece-anim {
-  position: absolute;
-  pointer-events: none;
-  transition: left 0.25s ease-out, top 0.25s ease-out;
 }
 
 .chess-viewer {

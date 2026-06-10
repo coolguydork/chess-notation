@@ -14,7 +14,7 @@ Nothing in a lower layer may import from a layer above it.
 src/
   pgn-editor/ — self-contained PGN parse/serialize + FEN-neutral AST; imports nothing else
   core/     — pure chess logic, no UI, no Obsidian
-  render/   — board rendering (SVG) and controls (HTML), no Obsidian
+  render/   — board config/themes and controls (HTML), no Obsidian
   view/     — DOM-aware interaction logic, no Obsidian
   plugin/   — Obsidian glue; wires core + render + view into the plugin lifecycle
 tests/
@@ -34,9 +34,9 @@ Flow: `core → render → view → plugin`. New interaction logic (pointer/drag
 - `game.ts` — `GameEditor`: owns the **editable** game as a `pgn-editor` AST (load, add/remove moves, serialize), with `chess.js` as the sole rules engine for validation/numbering. All PGN *edits* go through it; it projects to a read-only `MoveNode` tree for rendering. Plain holder + functions, no class (core/ convention).
 - No DOM, no Obsidian, no side effects. Functions are pure except `GameEditor`'s edit ops, which mutate the AST in place.
 
-### `render/` — Board rendering
-- Produces SVG from a `core/` board-state value object + a config (colors, theme, orientation, highlights).
-- `controls.ts` — `renderControls()` / `buildMoveListHtml()` (PGN viewer HTML); consumes the `core/tree.ts` move tree, never builds one.
+### `render/` — Board config & controls
+- `config.ts` — `BoardConfig`, highlight/arrow types, and the `BOARD_THEMES` presets. The board SVG itself is drawn by cm-chessboard, mounted from `view/cm-board.ts` with this config (the homemade SVG board was retired in the cm-chessboard migration).
+- `controls.ts` — `buildHeaderHtml()` / `buildMoveListHtml()` (PGN viewer HTML); consumes the `core/tree.ts` move tree, never builds one.
 - No Obsidian imports — usable in a plain browser or test environment. Piece assets referenced by injected path/URL, never hardcoded.
 
 ### `plugin/` — Obsidian integration
@@ -163,8 +163,10 @@ resolveAssetUrl?: (relPath: string) => string;
 ```
 
 - **Bundled + offline, zero config.** `esbuild.config.mjs` copies the cm-chessboard
-  sprites (`pieces/standard.svg`, `pieces/staunty.svg`, marker/arrow sprites) into
-  `dist/cm-chessboard/`, mirroring the package's `assets/` layout.
+  sprites (`pieces/standard.svg`, marker/arrow sprites) into
+  `dist/cm-chessboard/`, mirroring the package's `assets/` layout. Only the
+  sprites actually referenced are copied — adding a piece-set option means
+  adding its sheet to the copy list.
 - **The renderer never constructs URLs.** `plugin/` supplies `resolveAssetUrl` as
   an Obsidian resource path (`{pluginDir}/cm-chessboard/{rel}`); `view/` passes the
   relative path through. Outside Obsidian (tests/browser) it's optional and falls
