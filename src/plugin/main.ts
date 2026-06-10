@@ -406,11 +406,16 @@ async function writeBackOrientation(
 // ---------------------------------------------------------------------------
 
 class PgnViewerChild extends MarkdownRenderChild {
-  constructor(containerEl: HTMLElement, private viewer: PgnViewer) {
+  constructor(
+    containerEl: HTMLElement,
+    private viewer: PgnViewer,
+    private cleanup?: () => void
+  ) {
     super(containerEl);
   }
   onunload(): void {
     this.viewer.destroy();
+    this.cleanup?.();
   }
 }
 
@@ -434,15 +439,26 @@ function mountAnalysisPanel(
   onGraftLine?: (pvMoves: PvMove[], upToIndex: number) => void,
   onPreview?: (state: BoardState, from: number, to: number) => void,
   onEndPreview?: () => void,
-): { reset: () => void } {
+): { reset: () => void; destroy: () => void } {
   const panel = container.createDiv({ cls: "chess-analysis-panel" });
   const btn   = panel.createEl("button", { text: "Analyze", cls: "chess-analyze-btn" });
   const output = panel.createDiv({ cls: "chess-analysis-output" });
+
+  // The worker whose analyze() this panel is currently awaiting, if any.
+  let activeWorker: EngineWorker | null = null;
 
   function reset(): void {
     btn.disabled = false;
     btn.textContent = "Analyze";
     output.empty();
+  }
+
+  function destroy(): void {
+    // Panel torn down mid-analysis (block re-render on write-back, note
+    // closed): stop the orphaned search instead of letting it run to
+    // completion for nobody.
+    activeWorker?.stopSearch();
+    activeWorker = null;
   }
 
   btn.addEventListener("click", async () => {
@@ -452,6 +468,7 @@ function mountAnalysisPanel(
 
     try {
       const worker = getWorker();
+      activeWorker = worker;
       const state = getState();
       const result = await worker.analyze(state, []);
 
@@ -507,11 +524,12 @@ function mountAnalysisPanel(
       output.createEl("p", { text: `Engine error: ${msg}`, cls: "chess-engine-error" });
       btn.textContent = "Analyze";
     } finally {
+      activeWorker = null;
       btn.disabled = false;
     }
   });
 
-  return { reset };
+  return { reset, destroy };
 }
 
 // ---------------------------------------------------------------------------
@@ -871,13 +889,14 @@ export default class ChessPlugin extends Plugin {
             });
 
             let analysisFenReset: (() => void) | null = null;
+            let analysisFenDestroy: (() => void) | null = null;
 
             viewer.onChange((e) => {
               if (e.reason === "load-game") analysisFenReset?.();
             });
 
             this.mountAnalysisWhenAvailable(params.analysis, () => {
-              const { reset } = mountAnalysisPanel(
+              const { reset, destroy } = mountAnalysisPanel(
                 outerContainer,
                 () => viewer.getCurrentState(),
                 this.getEngineWorker.bind(this),
@@ -891,9 +910,10 @@ export default class ChessPlugin extends Plugin {
                 () => viewer.endEnginePreview(),
               );
               analysisFenReset = reset;
+              analysisFenDestroy = destroy;
             });
 
-            ctx.addChild(new PgnViewerChild(el, viewer));
+            ctx.addChild(new PgnViewerChild(el, viewer, () => analysisFenDestroy?.()));
             return;
           }
 
@@ -979,6 +999,7 @@ export default class ChessPlugin extends Plugin {
           });
 
           let analysisReset: (() => void) | null = null;
+          let analysisDestroy: (() => void) | null = null;
 
           // Analysis reset on game change
           viewer.onChange((e) => {
@@ -986,7 +1007,7 @@ export default class ChessPlugin extends Plugin {
           });
 
           this.mountAnalysisWhenAvailable(params.analysis, () => {
-            const { reset } = mountAnalysisPanel(
+            const { reset, destroy } = mountAnalysisPanel(
               outerContainer,
               () => viewer.getCurrentState(),
               this.getEngineWorker.bind(this),
@@ -1000,9 +1021,10 @@ export default class ChessPlugin extends Plugin {
               () => viewer.endEnginePreview(),
             );
             analysisReset = reset;
+            analysisDestroy = destroy;
           });
 
-          ctx.addChild(new PgnViewerChild(el, viewer));
+          ctx.addChild(new PgnViewerChild(el, viewer, () => analysisDestroy?.()));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           el.createEl("pre", { text: `Chess error: ${msg}`, cls: "chess-error" });

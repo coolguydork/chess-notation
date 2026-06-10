@@ -184,6 +184,8 @@ export class EngineWorker {
   private queue: Promise<unknown> = Promise.resolve();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private searching = false;
+  private stopSent = false;
 
   constructor(config: EngineWorkerConfig) {
     this.path = config.externalPath ?? "";
@@ -202,12 +204,17 @@ export class EngineWorker {
 
   /** Analyze a position. Resolves with the best lines found at the configured depth. */
   async analyze(state: BoardState, history: string[]): Promise<AnalysisResult> {
+    // A newer request preempts the running search so the queue advances
+    // promptly instead of waiting out the full depth.
+    this.stopSearch();
     return this.enqueue(async () => {
       this.clearIdleTimer();
       try {
         await this.ensureProcess();
         const lines: string[] = [];
         this.send(positionToUci(state, history));
+        this.searching = true;
+        this.stopSent = false;
         this.send(`go depth ${this.config.depth}`);
         // No timeout: deep searches may legitimately run long. If the engine
         // dies instead, the close handler fails this waiter.
@@ -217,9 +224,26 @@ export class EngineWorker {
         this.quitProcess(); // engine state is unknown — start fresh next time
         throw err;
       } finally {
+        this.searching = false;
         this.scheduleIdleQuit();
       }
     });
+  }
+
+  /**
+   * Interrupt the in-flight search, if any. Strict UCI: the engine answers
+   * `stop` by emitting the `bestmove` for the aborted search, which the
+   * waiting analyze() consumes as usual — it resolves early with the lines
+   * collected so far and the queue advances. No-op when no search is running,
+   * so it is safe to call at any time (e.g. when an analysis panel whose
+   * request may still be in flight is torn down).
+   */
+  stopSearch(): void {
+    if (!this.searching || this.stopSent || !this.proc) return;
+    this.stopSent = true;
+    try {
+      this.send("stop");
+    } catch { /* process died; the close handler fails the waiter */ }
   }
 
   /**

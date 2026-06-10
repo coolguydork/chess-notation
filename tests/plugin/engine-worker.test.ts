@@ -13,6 +13,15 @@ const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Poll until a condition holds (the FakeEngine answers on macrotasks). */
+async function waitUntil(cond: () => boolean): Promise<void> {
+  for (let i = 0; i < 500; i++) {
+    if (cond()) return;
+    await sleep(1);
+  }
+  throw new Error("waitUntil: condition not met in time");
+}
+
 // ---------------------------------------------------------------------------
 // buildSetOptionCommands
 // ---------------------------------------------------------------------------
@@ -115,6 +124,9 @@ class FakeEngine implements ChildProcess {
   onIsReady: (() => void) | null = null;
   /** Override the response to `uci` (e.g. a binary that isn't a UCI engine). */
   onUci: (() => void) | null = null;
+  /** Make the next `go` emit one info line, then hang until `stop` (one-shot). */
+  hangNextGo = false;
+  private pendingGo = false;
   private stdoutCb: ((chunk: Buffer | string) => void) | null = null;
   private stderrCb: ((chunk: Buffer | string) => void) | null = null;
   private closeCb: ((...args: unknown[]) => void) | null = null;
@@ -185,8 +197,21 @@ class FakeEngine implements ChildProcess {
       if (this.onIsReady) this.onIsReady();
       else this.emit("readyok");
     } else if (cmd.startsWith("go")) {
-      if (this.onGo) this.onGo();
-      else this.defaultGo();
+      if (this.onGo) {
+        this.onGo();
+      } else if (this.hangNextGo) {
+        this.hangNextGo = false;
+        this.pendingGo = true;
+        this.emit("info depth 6 multipv 1 score cp 18 pv d2d4 d7d5");
+      } else {
+        this.defaultGo();
+      }
+    } else if (cmd === "stop") {
+      // UCI: stop flushes the bestmove of the running search; ignored when idle.
+      if (this.pendingGo) {
+        this.pendingGo = false;
+        this.emit("bestmove d2d4");
+      }
     }
   }
 }
@@ -324,6 +349,75 @@ describe("EngineWorker", () => {
     const firstBestIdx = log.indexOf("< bestmove e2e4");
     const secondPositionIdx = log.indexOf("> position startpos moves e2e4");
     expect(secondPositionIdx).toBeGreaterThan(firstBestIdx);
+  });
+
+  it("stops the in-flight search when a new analyze is enqueued", async () => {
+    const { worker, procs } = makeWorker({}, (proc) => {
+      proc.hangNextGo = true; // first search runs until `stop` arrives
+    });
+    const p1 = worker.analyze(state, []);
+    await waitUntil(() => procs[0]?.log.includes("> go depth 12") ?? false);
+
+    // Without the `stop` sent here, the first search would hang forever and
+    // this test would time out — resolving at all is the promptness check.
+    const p2 = worker.analyze(state, ["e2e4"]);
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    const log = procs[0].log;
+    const stopIdx = log.indexOf("> stop");
+    expect(stopIdx).toBeGreaterThan(log.indexOf("> go depth 12"));
+    expect(log.indexOf("< bestmove d2d4")).toBeGreaterThan(stopIdx);
+    expect(log.indexOf("> position startpos moves e2e4")).toBeGreaterThan(
+      log.indexOf("< bestmove d2d4")
+    );
+
+    // The interrupted analyze resolves with the lines collected so far…
+    expect(r1.bestMove).toBe("d2d4");
+    expect(r1.moves[0].depth).toBe(6);
+    // …and the queued one runs a normal full search.
+    expect(r2.bestMove).toBe("e2e4");
+  });
+
+  it("sends stop at most once per search when several analyses pile up", async () => {
+    const { worker, procs } = makeWorker({}, (proc) => {
+      proc.hangNextGo = true;
+    });
+    const p1 = worker.analyze(state, []);
+    await waitUntil(() => procs[0]?.log.includes("> go depth 12") ?? false);
+
+    const p2 = worker.analyze(state, ["e2e4"]);
+    const p3 = worker.analyze(state, ["d2d4"]);
+    await Promise.all([p1, p2, p3]);
+
+    expect(procs[0].log.filter((e) => e === "> stop")).toHaveLength(1);
+  });
+
+  it("stopSearch flushes an orphaned search and keeps the worker usable", async () => {
+    // Panel teardown path: the block re-renders while a search is in flight.
+    const { worker, procs, spawnFn } = makeWorker({}, (proc) => {
+      proc.hangNextGo = true;
+    });
+    const p1 = worker.analyze(state, []);
+    await waitUntil(() => procs[0]?.log.includes("> go depth 12") ?? false);
+
+    worker.stopSearch();
+    const r1 = await p1;
+    expect(procs[0].log).toContain("> stop");
+    expect(r1.bestMove).toBe("d2d4");
+
+    // Same process, same handshake — the protocol is not desynced.
+    const r2 = await worker.analyze(state, []);
+    expect(r2.bestMove).toBe("e2e4");
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("stopSearch is a no-op when no search is running", async () => {
+    const { worker, procs } = makeWorker();
+    worker.stopSearch(); // before any process exists
+    await worker.analyze(state, []);
+    worker.stopSearch(); // engine idle between searches
+    await sleep(5);
+    expect(procs[0].log).not.toContain("> stop");
   });
 
   it("quits the engine after the idle timeout and respawns on next use", async () => {

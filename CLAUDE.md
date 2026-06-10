@@ -101,7 +101,7 @@ theme is a one-line entry in that record.
 - **Analysis mode ✅** — send the position to the engine; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
 - **Engine play mode** (human vs. engine, validated via `core/` rules) — not yet built; reuse `commitMove`.
 - **Engine delivery — external UCI binary only, engine-agnostic:** any user-installed UCI engine works; Stockfish is auto-discovered from common install paths, anything else is set explicitly in settings. Desktop-only. A bundled WASM engine was supported until 2026-06, then removed entirely (weaker, slower, and bloated the bundle); analysis on mobile is unsupported as a result.
-- **Persistent engine process (2026-06):** `EngineWorker` owns one long-lived process — spawned lazily, strict UCI handshake (`uci` → `uciok` gates `setoption` → `isready` → `readyok` → `ucinewgame`), commands serialized through a queue, quit after 5 min idle. Keeps heavyweight engines (Lc0 weight loading) warm across analyses; `spawnFn` is injectable so tests drive the state machine with a fake process.
+- **Persistent engine process (2026-06):** `EngineWorker` owns one long-lived process — spawned lazily, strict UCI handshake (`uci` → `uciok` gates `setoption` → `isready` → `readyok` → `ucinewgame`), commands serialized through a queue, quit after 5 min idle. A newer `analyze()` (or `stopSearch()` on panel teardown) sends `stop` so the in-flight search flushes its `bestmove` and the queue advances instead of waiting out the full depth. Keeps heavyweight engines (Lc0 weight loading) warm across analyses; `spawnFn` is injectable so tests drive the state machine with a fake process.
 
 ---
 
@@ -185,7 +185,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (431 tests across 19 suites)
+npm test           # vitest unit tests (435 tests across 19 suites)
 npm run dev        # watch mode
 ```
 
