@@ -25,7 +25,7 @@ tests/
   plugin/
 ```
 
-Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer) belongs in `view/`, not `plugin/`.
+Flow: `core → render → view → plugin`. New interaction logic (pointer/drag handling, selection, animation, the PGN viewer, the analysis panel) belongs in `view/`, not `plugin/`. The one-way rule is test-enforced: each layer has a `boundary.test.ts` (`tests/core/`, `tests/render/`, `tests/view/`, `tests/pgn-editor/`) that allow-lists its imports, so a violating import fails `npm test`.
 
 `pgn-editor/` is a leaf: `core/` may import it, it imports nothing (no `core/`/render/view/plugin/Obsidian/DOM — enforced by `tests/pgn-editor/boundary.test.ts`). It's a clean-room, MIT, variation-aware PGN parsing/serializing core, kept liftable into its own package.
 
@@ -98,7 +98,7 @@ theme is a one-line entry in that record.
 - **4 Polish:** six themes + `theme:` key; settings tab (theme, square size, coordinates); responsive/mobile board; `styles.css` shipped with `main.js`.
 
 ### Phase 5 — Engine integration ✅
-- **Analysis mode ✅** — send the position to the engine; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
+- **Analysis mode ✅** — send the position to the engine; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); panel UI in `view/analysis-panel.ts`; `plugin/` only mounts and wires it; `render/` reuses the Phase 3 highlight API.
 - **Engine play mode — descoped (2026-06).** The plugin is for taking notes, not playing games; human-vs-engine doesn't serve that. Not planned; if it ever returns, the seams already exist (`commitMove` is source-agnostic, and the analysis panel's `graftLine` proves engine moves entering the tree).
 - **Engine delivery — external UCI binary only, engine-agnostic:** any user-installed UCI engine works; Stockfish is auto-discovered from common install paths, anything else is set explicitly in settings. Desktop-only. A bundled WASM engine was supported until 2026-06, then removed entirely (weaker, slower, and bloated the bundle); analysis on mobile is unsupported as a result.
 - **Persistent engine process (2026-06):** `EngineWorker` owns one long-lived process — spawned lazily, strict UCI handshake (`uci` → `uciok` gates `setoption` → `isready` → `readyok` → `ucinewgame`), commands serialized through a queue, quit after 5 min idle. A newer `analyze()` (or `stopSearch()` on panel teardown) sends `stop` so the in-flight search flushes its `bestmove` and the queue advances instead of waiting out the full depth. Keeps heavyweight engines (Lc0 weight loading) warm across analyses; `spawnFn` is injectable so tests drive the state machine with a fake process.
