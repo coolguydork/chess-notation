@@ -572,8 +572,8 @@ class ChessSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Engine binary path")
-      .setDesc("Absolute path to a UCI-compatible engine executable (e.g. Stockfish via Homebrew or apt; desktop only). " +
-               "Leave blank to auto-discover from common install locations.")
+      .setDesc("Absolute path to any UCI engine executable — Stockfish, Lc0, etc. (desktop only). " +
+               "Leave blank to auto-discover Stockfish from common install locations.")
       .addText((text) => {
         text
           .setPlaceholder("/opt/homebrew/bin/stockfish")

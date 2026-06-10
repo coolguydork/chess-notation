@@ -98,9 +98,10 @@ theme is a one-line entry in that record.
 - **4 Polish:** six themes + `theme:` key; settings tab (theme, square size, coordinates); responsive/mobile board; `styles.css` shipped with `main.js`.
 
 ### Phase 5 — Engine integration 🚧
-- **Analysis mode ✅** — send the position to Stockfish; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
+- **Analysis mode ✅** — send the position to the engine; show top moves, evaluation, and arrows on the board. Logic in `core/engine.ts` (pure; no Obsidian/rendering); `plugin/` wires the UI; `render/` reuses the Phase 3 highlight API.
 - **Engine play mode** (human vs. engine, validated via `core/` rules) — not yet built; reuse `commitMove`.
-- **Stockfish delivery — external binary only:** a user-installed UCI engine, auto-discovered from common install paths or set explicitly in settings. UCI-generic and desktop-only. A bundled WASM engine was supported until 2026-06, then removed entirely (weaker, slower, and bloated the bundle); analysis on mobile is unsupported as a result.
+- **Engine delivery — external UCI binary only, engine-agnostic:** any user-installed UCI engine works; Stockfish is auto-discovered from common install paths, anything else is set explicitly in settings. Desktop-only. A bundled WASM engine was supported until 2026-06, then removed entirely (weaker, slower, and bloated the bundle); analysis on mobile is unsupported as a result.
+- **Persistent engine process (2026-06):** `EngineWorker` owns one long-lived process — spawned lazily, strict UCI handshake (`uci` → `uciok` gates `setoption` → `isready` → `readyok` → `ucinewgame`), commands serialized through a queue, quit after 5 min idle. Keeps heavyweight engines (Lc0 weight loading) warm across analyses; `spawnFn` is injectable so tests drive the state machine with a fake process.
 
 ---
 
@@ -184,7 +185,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (410 tests across 18 suites)
+npm test           # vitest unit tests (415 tests across 19 suites)
 npm run dev        # watch mode
 ```
 

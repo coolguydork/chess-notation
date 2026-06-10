@@ -11,38 +11,26 @@ export interface EngineWorkerConfig {
   multiPV?: number;                       // default 3
   depth?: number;                         // default 20
   userOptions?: Record<string, string>;   // engine options set by the user (setoption name X value Y)
+  idleTimeoutMs?: number;                 // quit the engine process after this much inactivity (default 5 min)
+  spawnFn?: (binaryPath: string) => ChildProcess; // injectable for tests; defaults to child_process.spawn
 }
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
 // ---------------------------------------------------------------------------
 
-export interface UciSession {
-  /** Sent immediately in order: uci, setoptions, isready. */
-  setup: string[];
-  /** Sent after readyok. */
-  position: string;
-  /** Sent immediately after position. */
-  go: string;
-}
-
-/** Build a UCI analysis session for a position. */
-export function buildUciCommands(
-  state: BoardState,
-  history: string[],
-  depth: number,
+/**
+ * Build the setoption commands for a session. Strict UCI: these must not be
+ * sent until the engine has answered `uci` with `uciok`.
+ */
+export function buildSetOptionCommands(
   multiPV: number,
   userOptions: Record<string, string> = {}
-): UciSession {
-  const setoptions = [
+): string[] {
+  return [
     `setoption name MultiPV value ${multiPV}`,
     ...Object.entries(userOptions).map(([k, v]) => `setoption name ${k} value ${v}`),
   ];
-  return {
-    setup: ["uci", ...setoptions, "isready"],
-    position: positionToUci(state, history),
-    go: `go depth ${depth}`,
-  };
 }
 
 /**
@@ -76,7 +64,7 @@ export function collectAnalysis(lines: string[]): AnalysisResult {
 // Engine worker class
 // ---------------------------------------------------------------------------
 
-type ChildProcess = {
+export type ChildProcess = {
   stdin: { write: (data: string) => void };
   stdout: { on: (event: "data", cb: (chunk: Buffer | string) => void) => void };
   stderr: { on: (event: "data", cb: (chunk: Buffer | string) => void) => void };
@@ -93,14 +81,21 @@ const DEFAULT_SEARCH_PATHS = [
   "stockfish",
 ];
 
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+// Any UCI engine answers `uci` immediately, before loading anything heavy.
+const UCIOK_TIMEOUT_MS = 10_000;
+// `readyok` is where heavyweight engines (e.g. Lc0) load network weights.
+const READYOK_TIMEOUT_MS = 60_000;
+
 /** Probe a candidate binary by running a real UCI handshake (uci → uciok). */
-async function probeUciBinary(candidate: string): Promise<boolean> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { spawn } = (globalThis as any).require("child_process") as typeof import("child_process");
+async function probeUciBinary(
+  candidate: string,
+  spawnFn: (binaryPath: string) => ChildProcess
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    let proc: ReturnType<typeof spawn>;
+    let proc: ChildProcess;
     try {
-      proc = spawn(candidate, [], { stdio: "pipe" });
+      proc = spawnFn(candidate);
     } catch {
       resolve(false);
       return;
@@ -112,48 +107,68 @@ async function probeUciBinary(candidate: string): Promise<boolean> {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      try { proc.stdin?.write("quit\n"); } catch { /* ignore */ }
+      try { proc.stdin.write("quit\n"); } catch { /* ignore */ }
+      try { proc.kill(); } catch { /* ignore */ }
       resolve(result);
     };
 
     const timer = setTimeout(() => finish(false), 3000);
-    proc.stdout?.on("data", (chunk: Buffer | string) => {
+    proc.stdout.on("data", (chunk: Buffer | string) => {
       output += chunk.toString();
       if (output.includes("uciok")) finish(true);
     });
     proc.on("error", () => finish(false));
     proc.on("close", () => finish(false));
 
-    if (proc.stdin) {
-      try { proc.stdin.write("uci\n"); } catch { finish(false); }
-    } else {
-      finish(false);
-    }
+    try { proc.stdin.write("uci\n"); } catch { finish(false); }
   });
 }
 
-async function findExternalBinary(explicit?: string): Promise<string | null> {
-  const candidates = explicit ? [explicit] : DEFAULT_SEARCH_PATHS;
-  for (const candidate of candidates) {
-    if (await probeUciBinary(candidate)) return candidate;
+/** Find the first auto-discovery candidate that speaks UCI. */
+async function findDiscoveredBinary(
+  spawnFn: (binaryPath: string) => ChildProcess
+): Promise<string | null> {
+  for (const candidate of DEFAULT_SEARCH_PATHS) {
+    if (await probeUciBinary(candidate, spawnFn)) return candidate;
   }
   return null;
 }
 
-function spawnProcess(binaryPath: string): ChildProcess {
+function defaultSpawn(binaryPath: string): ChildProcess {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { spawn } = (globalThis as any).require("child_process") as typeof import("child_process");
   return spawn(binaryPath, [], { stdio: "pipe" }) as unknown as ChildProcess;
 }
 
+interface LineWaiter {
+  onLine: (line: string) => void;
+  fail: (err: Error) => void;
+}
+
+/**
+ * Owns a persistent UCI engine process. The process is spawned lazily on the
+ * first command, handshaken once (uci → uciok → setoption… → isready →
+ * readyok → ucinewgame), reused across analyses, and quit after an idle
+ * period so a heavyweight engine doesn't sit in memory between sessions.
+ * Commands are serialized through an internal queue; the engine sees one
+ * search at a time.
+ */
 export class EngineWorker {
   readonly path: string;
   readonly userOptionsKey: string;
   readonly depth: number;
   readonly multiPV: number;
-  private config: Required<EngineWorkerConfig>;
-  private proc: ChildProcess | null = null;
+  private config: Required<Omit<EngineWorkerConfig, "spawnFn">>;
+  private spawnFn: (binaryPath: string) => ChildProcess;
   private binaryPath: string | null = null;
+  private proc: ChildProcess | null = null;
+  private handshakeDone = false;
+  private stdoutBuffer = "";
+  private waiter: LineWaiter | null = null;
+  private advertisedOptions: UciOptionDef[] = [];
+  private queue: Promise<unknown> = Promise.resolve();
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
 
   constructor(config: EngineWorkerConfig) {
     this.path = config.externalPath ?? "";
@@ -163,125 +178,202 @@ export class EngineWorker {
       multiPV: config.multiPV ?? 3,
       depth: config.depth ?? 20,
       userOptions: config.userOptions ?? {},
+      idleTimeoutMs: config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
     };
+    this.spawnFn = config.spawnFn ?? defaultSpawn;
     this.depth = this.config.depth;
     this.multiPV = this.config.multiPV;
   }
 
-  /** Check whether a usable engine is reachable. */
-  async probe(): Promise<boolean> {
-    const path = await findExternalBinary(this.config.externalPath || undefined);
-    if (path) this.binaryPath = path;
-    return path !== null;
-  }
-
   /** Analyze a position. Resolves with the best lines found at the configured depth. */
   async analyze(state: BoardState, history: string[]): Promise<AnalysisResult> {
-    const { depth, multiPV, userOptions } = this.config;
-    const session = buildUciCommands(state, history, depth, multiPV, userOptions);
-
-    if (!this.binaryPath) {
-      const path = await findExternalBinary(this.config.externalPath || undefined);
-      if (!path) throw new Error("UCI engine binary not found");
-      this.binaryPath = path;
-    }
-
-    return new Promise<AnalysisResult>((resolve, reject) => {
-      const proc = spawnProcess(this.binaryPath!);
-      this.proc = proc;
-
-      const outputLines: string[] = [];
-      let buffer = "";
-      let resolved = false;
-      let readyOkSeen = false;
-
-      const send = (cmd: string): void => { proc.stdin.write(cmd + "\n"); };
-
-      proc.stdout.on("data", (chunk) => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          outputLines.push(trimmed);
-
-          if (!readyOkSeen && trimmed === "readyok") {
-            readyOkSeen = true;
-            send(session.position);
-            send(session.go);
-          }
-
-          if (!resolved && trimmed.startsWith("bestmove")) {
-            resolved = true;
-            proc.kill();
-            resolve(collectAnalysis(outputLines));
-          }
-        }
-      });
-
-      proc.on("error", (err) => { if (!resolved) reject(err); });
-      proc.on("close", (code) => {
-        if (!resolved && code !== 0 && code !== null) {
-          reject(new Error(`Engine exited with code ${code}`));
-        }
-      });
-
-      for (const cmd of session.setup) send(cmd);
+    return this.enqueue(async () => {
+      this.clearIdleTimer();
+      try {
+        await this.ensureProcess();
+        const lines: string[] = [];
+        this.send(positionToUci(state, history));
+        this.send(`go depth ${this.config.depth}`);
+        // No timeout: deep searches may legitimately run long. If the engine
+        // dies instead, the close handler fails this waiter.
+        await this.waitFor((l) => l.startsWith("bestmove"), (l) => lines.push(l), null);
+        return collectAnalysis(lines);
+      } catch (err) {
+        this.quitProcess(); // engine state is unknown — start fresh next time
+        throw err;
+      } finally {
+        this.scheduleIdleQuit();
+      }
     });
   }
 
   /**
-   * Probe the engine binary and return all UCI options it advertises.
-   * Returns an empty array if the binary is unreachable.
+   * Return all UCI options the engine advertises (collected during the
+   * handshake). Returns an empty array if the engine is unreachable.
    */
   async discoverOptions(): Promise<UciOptionDef[]> {
-    const binaryPath = this.binaryPath
-      ?? await findExternalBinary(this.config.externalPath || undefined);
-    if (!binaryPath) return [];
-
-    return new Promise<UciOptionDef[]>((resolve) => {
-      let proc: ChildProcess;
-      try { proc = spawnProcess(binaryPath); }
-      catch { resolve([]); return; }
-
-      const options: UciOptionDef[] = [];
-      let buffer = "";
-      let done = false;
-
-      const finish = (): void => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        try { proc.kill(); } catch { /* ignore */ }
-        resolve(options);
-      };
-
-      const timer = setTimeout(finish, 3000);
-
-      proc.stdout.on("data", (chunk: Buffer | string) => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("option ")) {
-            const opt = parseOptionLine(trimmed);
-            if (opt) options.push(opt);
-          }
-          if (trimmed === "uciok") finish();
-        }
-      });
-
-      proc.on("error", () => { clearTimeout(timer); resolve([]); });
-      proc.on("close", () => { clearTimeout(timer); resolve(options); });
-
-      proc.stdin.write("uci\n");
+    return this.enqueue(async () => {
+      this.clearIdleTimer();
+      try {
+        await this.ensureProcess();
+        return [...this.advertisedOptions];
+      } catch {
+        return [];
+      } finally {
+        this.scheduleIdleQuit();
+      }
     });
   }
 
   dispose(): void {
-    this.proc?.kill();
+    this.disposed = true;
+    this.quitProcess();
+  }
+
+  // -- process lifecycle ----------------------------------------------------
+
+  private async ensureProcess(): Promise<void> {
+    if (this.disposed) throw new Error("Engine worker disposed");
+    if (this.proc && this.handshakeDone) return;
+
+    if (!this.binaryPath) {
+      if (this.config.externalPath) {
+        // Explicit path: spawn directly — the strict handshake below is itself
+        // the probe, and heavyweight engines shouldn't be started twice.
+        this.binaryPath = this.config.externalPath;
+      } else {
+        const found = await findDiscoveredBinary(this.spawnFn);
+        if (!found) throw new Error("UCI engine binary not found");
+        this.binaryPath = found;
+      }
+    }
+
+    this.proc = this.startProcess(this.binaryPath);
+    this.advertisedOptions = [];
+
+    // Strict UCI handshake: nothing but `uci` goes out until the engine
+    // answers `uciok`; options are set before the readiness check.
+    this.send("uci");
+    await this.waitFor(
+      (l) => l === "uciok",
+      (l) => {
+        if (l.startsWith("option ")) {
+          const opt = parseOptionLine(l);
+          if (opt) this.advertisedOptions.push(opt);
+        }
+      },
+      UCIOK_TIMEOUT_MS
+    );
+    for (const cmd of buildSetOptionCommands(this.config.multiPV, this.config.userOptions)) {
+      this.send(cmd);
+    }
+    this.send("isready");
+    await this.waitFor((l) => l === "readyok", undefined, READYOK_TIMEOUT_MS);
+    this.send("ucinewgame");
+    this.send("isready");
+    await this.waitFor((l) => l === "readyok", undefined, READYOK_TIMEOUT_MS);
+    this.handshakeDone = true;
+  }
+
+  private startProcess(binaryPath: string): ChildProcess {
+    const proc = this.spawnFn(binaryPath);
+    proc.stdout.on("data", (chunk) => {
+      if (this.proc !== proc) return; // late flush from a replaced process
+      this.stdoutBuffer += chunk.toString();
+      const lines = this.stdoutBuffer.split("\n");
+      this.stdoutBuffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (line) this.waiter?.onLine(line);
+      }
+    });
+    // Drain stderr so chatty engines (Lc0 logs there) never fill the pipe and stall.
+    proc.stderr.on("data", () => { /* drained */ });
+    proc.on("error", (err) => {
+      if (this.proc === proc) this.onProcessGone(err instanceof Error ? err : new Error(String(err)));
+    });
+    proc.on("close", () => {
+      if (this.proc === proc) this.onProcessGone(new Error("Engine process exited"));
+    });
+    return proc;
+  }
+
+  private onProcessGone(err: Error): void {
     this.proc = null;
+    this.handshakeDone = false;
+    this.stdoutBuffer = "";
+    const waiter = this.waiter;
+    this.waiter = null;
+    waiter?.fail(err);
+  }
+
+  private quitProcess(): void {
+    this.clearIdleTimer();
+    const proc = this.proc;
+    if (!proc) return;
+    this.proc = null; // before kill, so the close handler's guard skips onProcessGone
+    this.handshakeDone = false;
+    this.stdoutBuffer = "";
+    const waiter = this.waiter;
+    this.waiter = null;
+    waiter?.fail(new Error("Engine process stopped"));
+    try { proc.stdin.write("quit\n"); } catch { /* engine may already be gone */ }
+    try { proc.kill(); } catch { /* ignore */ }
+  }
+
+  private scheduleIdleQuit(): void {
+    if (!this.proc) return;
+    this.clearIdleTimer();
+    this.idleTimer = setTimeout(() => this.quitProcess(), this.config.idleTimeoutMs);
+  }
+
+  private clearIdleTimer(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  // -- protocol plumbing ----------------------------------------------------
+
+  private send(cmd: string): void {
+    if (!this.proc) throw new Error("Engine process not running");
+    this.proc.stdin.write(cmd + "\n");
+  }
+
+  private waitFor(
+    predicate: (line: string) => boolean,
+    onLine: ((line: string) => void) | undefined,
+    timeoutMs: number | null
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = timeoutMs !== null
+        ? setTimeout(() => {
+            this.waiter = null;
+            reject(new Error("Engine did not respond in time"));
+          }, timeoutMs)
+        : null;
+      this.waiter = {
+        onLine: (line) => {
+          onLine?.(line);
+          if (predicate(line)) {
+            if (timer) clearTimeout(timer);
+            this.waiter = null;
+            resolve();
+          }
+        },
+        fail: (err) => {
+          if (timer) clearTimeout(timer);
+          reject(err);
+        },
+      };
+    });
+  }
+
+  /** Run tasks one at a time; a failed task doesn't poison later ones. */
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    this.queue = run.then(() => undefined, () => undefined);
+    return run;
   }
 }
