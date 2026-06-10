@@ -1,6 +1,6 @@
 # Chess for Obsidian
 
-Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, edit them by playing moves on the board, annotate with comments and glyphs, analyze positions with Stockfish, and choose from six board themes — all without leaving Obsidian.
+Render interactive chess boards inside your notes using FEN or PGN notation. Navigate games move by move, edit them by playing moves on the board, annotate with comments and glyphs, analyze positions with any UCI engine (Stockfish works out of the box), and choose from six board themes — all without leaving Obsidian.
 
 ---
 
@@ -14,7 +14,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 | **Edit games in place** | Play a move on the board to extend the line or branch a variation. Right-click any move to add comments, annotation glyphs (`!`, `?`, `!!`…), delete from that point, or promote a variation to the main line. Edits are **written back to the note**. |
 | **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
 | **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
-| **Engine analysis** | A Stockfish-powered analysis panel (shown by default). Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
+| **Engine analysis** | An analysis panel powered by any UCI engine — Stockfish is auto-discovered, and the panel appears automatically whenever an engine is found. Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
 | **Board orientation** | Flip any board to Black's perspective with `orientation: black`, or with the flip (⇆) button. |
 | **Mobile & touch** | Pointer events handle mouse and touch uniformly. The board scales to fill narrow viewports. |
@@ -36,6 +36,7 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 - [Board themes](#board-themes)
 - [Engine analysis](#engine-analysis)
   - [Installing Stockfish](#installing-stockfish)
+  - [Using a different engine](#using-a-different-engine)
   - [Plugin settings](#plugin-settings)
   - [Reading the analysis output](#reading-the-analysis-output)
 - [Settings reference](#settings-reference)
@@ -86,12 +87,12 @@ pgn: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 ```
 ````
 
-**Analyze a position with Stockfish:**
+**Analyze a position** (the analysis panel appears automatically when a UCI
+engine such as Stockfish is installed — see [Engine analysis](#engine-analysis)):
 
 ````markdown
 ```chess
 fen: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
-analysis: true
 ```
 ````
 
@@ -144,7 +145,7 @@ Renders a game viewer with previous/next navigation buttons and a clickable move
 | `pgn` | string | — | PGN string (required if no `fen`) |
 | `orientation` | `white` \| `black` | `white` | Board orientation |
 | `theme` | string | plugin setting | Board color theme |
-| `analysis` | boolean | `true` | Show the Stockfish analysis panel (set `false` to hide) |
+| `analysis` | boolean | *auto* | Show the engine analysis panel. By default it appears when a UCI engine is detected (desktop only) and stays hidden otherwise; set `true`/`false` to override. |
 
 The PGN parser and viewer handle:
 - Standard algebraic notation for all piece moves, captures, castling, en passant, and promotion
@@ -209,7 +210,12 @@ pgn: 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 *
 
 ### Analysis blocks
 
-The Stockfish analysis panel is shown **by default** on every block — there's nothing to add. To hide it, set `analysis: false`.
+The engine analysis panel is shown **automatically** on every block when a UCI
+engine is detected — there's nothing to add. Without an engine (and always on
+mobile, where engine analysis is unsupported) the panel stays hidden, so the
+same note renders a clean board everywhere. Set `analysis: false` to hide the
+panel even with an engine present, or `analysis: true` to force it on a system
+where detection failed.
 
 ````markdown
 ```chess
@@ -220,7 +226,7 @@ analysis: false
 
 When you click **Analyze**:
 
-1. The plugin spawns Stockfish and sends the position via the UCI protocol
+1. The plugin sends the position to the configured engine via the UCI protocol
 2. The engine searches to the configured depth (default: 18)
 3. Results appear as colored arrows on the board and an eval list below it:
    - **Green arrow** — best move (line 1)
@@ -307,7 +313,18 @@ Six built-in themes. Set `theme:` in any block, or choose a default in plugin se
 
 ## Engine analysis
 
-The plugin communicates with Stockfish over the UCI protocol. Two delivery modes are supported; choose in **Settings → Chess → Engine mode**.
+The plugin is engine-agnostic: it talks to an external chess engine over the
+[UCI protocol](https://www.chessprogramming.org/UCI), so any UCI engine works —
+Stockfish, Lc0, Komodo, and so on. Stockfish is the recommended default and is
+auto-discovered from common install locations; any other engine just needs its
+path set in **Settings → Chess → Engine binary path**. (Desktop only — analysis
+is unavailable on mobile.)
+
+The engine process is started on the first analysis and kept warm: follow-up
+analyses reuse the running process instead of paying its startup cost again.
+This matters for heavyweight engines like Lc0, which load neural-net weights
+at startup. After 5 minutes without an analysis the engine is quit to free
+memory; the next analysis restarts it transparently.
 
 ### Installing Stockfish
 
@@ -323,7 +340,7 @@ The plugin auto-discovers Stockfish at `/opt/homebrew/bin/stockfish`, `/usr/loca
 
 1. Download the latest Stockfish release from [stockfishchess.org](https://stockfishchess.org/download/)
 2. Unzip and note the path to `stockfish.exe`
-3. In plugin settings set **Stockfish binary path** to that path, e.g. `C:\tools\stockfish\stockfish.exe`
+3. In plugin settings set **Engine binary path** to that path, e.g. `C:\tools\stockfish\stockfish.exe`
 
 **Linux:**
 
@@ -335,10 +352,23 @@ sudo apt install stockfish
 sudo pacman -S stockfish
 ```
 
+### Using a different engine
+
+Any UCI engine works. Install it however you like, then set **Engine binary
+path** to its executable. Two notes:
+
+- **Engine options** (Threads, Hash, network weights, …) are discovered from
+  the engine itself and exposed under **Settings → Chess → Engine options**,
+  so engine-specific configuration — e.g. Lc0's `WeightsFile` — is set there.
+- **Lc0** works well thanks to the persistent engine process: the slow
+  weights-loading happens once on the first analysis, not on every click.
+
 **Verify from the terminal:**
 
 ```bash
 node scripts/probe-engine.mjs
+# or probe a different engine:
+CHESS_ENGINE=/path/to/engine node scripts/probe-engine.mjs
 ```
 
 You should see output like:
@@ -367,8 +397,8 @@ Open **Settings → Chess → Engine** to configure:
 
 | Setting | Default | Description |
 |---|---|---|
-| Engine binary path | *(empty)* | Absolute path to a UCI-compatible engine executable. Leave blank to auto-discover from the PATH and common install locations. |
-| Analysis depth | `18` | Stockfish search depth. 15–18 is strong and fast; 25+ is very strong but may take several seconds. |
+| Engine binary path | *(empty)* | Absolute path to any UCI engine executable. Leave blank to auto-discover Stockfish from the PATH and common install locations. |
+| Analysis depth | `18` | Engine search depth. 15–18 is strong and fast; 25+ is very strong but may take several seconds. |
 | Lines shown (MultiPV) | `3` | Number of distinct top moves to display. 1 shows only the best move. |
 
 ### Reading the analysis output
@@ -513,7 +543,7 @@ No Obsidian imports — usable in any browser or test environment.
 | File | Responsibility |
 |---|---|
 | `main.ts` | Plugin entry point: registers the `chess` block processor, owns settings + the settings tab, mounts the viewer and analysis panel, raises edit context menus, writes edits back to the note |
-| `engine-worker.ts` | `EngineWorker`: spawns Stockfish via `child_process`, manages the UCI handshake, resolves with `AnalysisResult`; pure helpers `buildUciCommands` / `collectAnalysis` are exported for testing |
+| `engine-worker.ts` | `EngineWorker`: owns a persistent UCI engine process (spawned via `child_process`, strict `uci → uciok → setoption → isready` handshake, serialized commands, quits after 5 min idle), resolves analyses with `AnalysisResult`; pure helpers `buildSetOptionCommands` / `collectAnalysis` are exported for testing |
 | `yaml-block.ts` | Parse the chess-block YAML into block params; serialize edits back to a YAML-safe `pgn:` scalar |
 | `styles.css` | Scoped CSS for boards, PGN viewer, and analysis panel |
 

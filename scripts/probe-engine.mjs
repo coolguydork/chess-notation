@@ -1,11 +1,11 @@
-// Quick smoke-test: run Stockfish against a position and print top moves.
-// Usage: node scripts/probe-engine.mjs [fen]
+// Quick smoke-test: run a UCI engine against a position and print top moves.
+// Usage: [CHESS_ENGINE=/path/to/engine] node scripts/probe-engine.mjs [fen]
 
 import { spawn } from "child_process";
 
 // Inline the pure helpers (avoids needing to build the TS first)
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const BINARY = "/opt/homebrew/bin/stockfish";
+const BINARY = process.env.CHESS_ENGINE ?? "/opt/homebrew/bin/stockfish";
 const DEPTH = 18;
 const MULTI_PV = 3;
 
