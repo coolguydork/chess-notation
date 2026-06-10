@@ -71,6 +71,43 @@ describe("pgn-editor parse", () => {
       const g = parse("1. e4 { multi\n  line  comment } e5 *");
       expect(g.moves[0].commentAfter).toBe("multi line comment");
     });
+
+    // A comment after a move implicitly belongs to that move, even when one or
+    // more variations sit in between — commentMove is only for a comment that
+    // genuinely leads a line (game or variation intro).
+    it("attaches a comment after a variation to the preceding move's after-slot", () => {
+      const g = parse("1. e4 ( 1. d4 ) { hi } 1... e5 2. Nf3 *", { strict: true });
+      expect(g.moves[0].commentAfter).toBe("hi");
+      expect(g.moves[1].commentMove).toBeUndefined();
+    });
+
+    it("attaches a comment between two variations to the preceding move", () => {
+      const g = parse("1. e4 ( 1. d4 ) { hi } ( 1. c4 ) 1... e5 *", { strict: true });
+      expect(g.moves.map((m) => m.san)).toEqual(["e4", "e5"]);
+      expect(g.moves[0].commentAfter).toBe("hi");
+      expect(g.moves[0].variations.map((v) => v[0].san)).toEqual(["d4", "c4"]);
+    });
+
+    it("keeps a comment after a variation at the end of a line", () => {
+      const g = parse("1. e4 e5 ( 1... c6 ) { hi } *", { strict: true });
+      expect(g.moves[1].commentAfter).toBe("hi");
+    });
+
+    it("merges comments straddling a variation into one after-comment", () => {
+      const g = parse("1. e4 { a } ( 1. d4 ) { b } 1... e5 *", { strict: true });
+      expect(g.moves[0].commentAfter).toBe("a b");
+    });
+
+    it("attaches a NAG after a variation to the preceding move", () => {
+      const g = parse("1. e4 ( 1. d4 ) $1 1... e5 *", { strict: true });
+      expect(g.moves[0].nags).toEqual([1]);
+      expect(g.moves.map((m) => m.san)).toEqual(["e4", "e5"]);
+    });
+
+    it("still takes a leading comment inside a variation as its intro", () => {
+      const g = parse("1. e4 e5 ( { gambit try } 1... c5 ) 2. Nf3 *", { strict: true });
+      expect(g.moves[1].variations[0][0].commentMove).toBe("gambit try");
+    });
   });
 
   describe("null moves (gap vs cm-pgn)", () => {

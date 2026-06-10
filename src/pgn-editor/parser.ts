@@ -147,7 +147,9 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
   let result: string | null = null;
 
   for (;;) {
-    // Comments before the move number become the next ply's commentMove.
+    // A comment here can only lead the line (game or variation intro): the
+    // post-SAN tail loop consumes everything after a move, including comments
+    // that follow its variations. It becomes the upcoming ply's commentMove.
     const commentMove = readComments(c);
     skipSpace(c);
     if (eof(c) || c.s[c.i] === ")") break;
@@ -182,7 +184,12 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
     if (commentMove) node.commentMove = commentMove;
     if (commentBefore) node.commentBefore = commentBefore;
 
-    // After the SAN: NAGs and the after-comment may interleave.
+    // After the SAN: NAGs, after-comments, and variations may interleave in any
+    // order. A comment anywhere in this tail belongs to THIS move's after-slot —
+    // a comment following a move (or one of its variations) annotates that move;
+    // commentMove is only for a comment that genuinely leads a line. Variations
+    // branch from this ply's parent — i.e. they are alternatives to THIS move,
+    // so they start at this ply's side/number.
     let commentAfter: string | undefined;
     for (;;) {
       skipSpace(c);
@@ -196,21 +203,17 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
         commentAfter = commentAfter ? `${commentAfter} ${cm}` : cm;
         continue;
       }
+      if (c.s[c.i] === "(") {
+        c.i++; // consume "("
+        const sub = parseLine(c, { color: turn.color, num: turn.num });
+        skipSpace(c);
+        if (c.s[c.i] === ")") c.i++; // consume ")"
+        if (sub.moves.length > 0) node.variations.push(sub.moves);
+        continue;
+      }
       break;
     }
     if (commentAfter) node.commentAfter = commentAfter;
-
-    // Variations branch from this ply's parent — i.e. they are alternatives to
-    // THIS move, so they start at this ply's side/number.
-    for (;;) {
-      skipSpace(c);
-      if (c.s[c.i] !== "(") break;
-      c.i++; // consume "("
-      const sub = parseLine(c, { color: turn.color, num: turn.num });
-      skipSpace(c);
-      if (c.s[c.i] === ")") c.i++; // consume ")"
-      if (sub.moves.length > 0) node.variations.push(sub.moves);
-    }
 
     moves.push(node);
     turn = advance(turn);

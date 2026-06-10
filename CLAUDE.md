@@ -187,7 +187,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (447 tests across 23 suites)
+npm test           # vitest unit tests (454 tests across 23 suites)
 npm run dev        # watch mode
 ```
 

@@ -30,6 +30,12 @@ describe("pgn-editor serialize", () => {
     roundTrips("1. e4 -- 2. Z0 e5 *");
   });
 
+  it("round-trips a comment that follows a variation (re-anchored before it)", () => {
+    // The comment attaches to e4's after-slot; serialization emits it before
+    // the variation, which re-parses to the identical AST.
+    roundTrips("1. e4 ( 1. d4 ) { hi } ( 1. c4 ) 1... e5 2. Nf3 *");
+  });
+
   it("round-trips headers including FEN", () => {
     roundTrips(`[Event "T"]\n[Result "1-0"]\n[FEN "8/8/8/8/8/8/8/8 w - - 0 1"]\n\n1. e4 1-0`);
   });
