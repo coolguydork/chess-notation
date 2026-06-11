@@ -7,18 +7,21 @@
 // can be lifted into its own package later without untangling imports.
 // ---------------------------------------------------------------------------
 
-export type { Color, PgnNode, PgnGameAst } from "./types";
+export type { Color, PgnItem, PgnNode, PgnComment, PgnVariation, PgnGameAst } from "./types";
+export { isMove, isComment, isVariation } from "./types";
 export { parse } from "./parser";
 export { parseGames, hasTopLevelResult } from "./parseGames";
 export { serialize, serializeMovetext, serializeInline } from "./serialize";
 
-// Structural tree navigation + FEN-neutral edits (move-level Update/Delete).
-export type { NodeLoc, CommentField } from "./edit";
+// Structural stream navigation + FEN-neutral edits (move-level Update/Delete).
+export type { NodeLoc } from "./edit";
 export {
   childrenOf,
   resolvePath,
   nodeAt,
-  setComment,
+  adjacentComment,
+  setAdjacentComment,
+  updateComment,
   setNags,
   removeAt,
   promoteVariation,

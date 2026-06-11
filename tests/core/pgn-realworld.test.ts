@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parsePGN, parseMultiPGN } from "../../src/core/pgn";
+import { parsePGN, parseMultiPGN, cleanComment } from "../../src/core/pgn";
+import { isMove, isComment, isVariation } from "../../src/pgn-editor";
+import type { PgnItem, PgnNode, PgnComment, PgnVariation } from "../../src/pgn-editor";
 
 // Real-world exports (Lichess/study/multi-game). These exercise the robustness
 // of our own pgn-editor parser through the core parsePGN/parseMultiPGN API.
+
+const movesOf = (items: PgnItem[]): PgnNode[] => items.filter(isMove);
+const commentsOf = (items: PgnItem[]): PgnComment[] => items.filter(isComment);
+const variationsOf = (items: PgnItem[]): PgnVariation[] => items.filter(isVariation);
 
 describe("real-world PGN", () => {
   it("parses a Lichess blitz export with per-move clock annotations", () => {
@@ -24,9 +30,11 @@ describe("real-world PGN", () => {
     expect(game.headers["Opening"]).toBe("Italian Game");
     expect(game.headers["ECO"]).toBe("C50");
     expect(game.result).toBe("1-0");
-    expect(game.moves.map((m) => m.san)).toEqual(["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]);
-    // pure-clock comments leave no text comment behind
-    expect(game.moves.every((m) => m.comment === undefined)).toBe(true);
+    expect(movesOf(game.items).map((m) => m.san)).toEqual(["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]);
+    // the raw clock annotations survive in the stream (write-back fidelity)…
+    expect(commentsOf(game.items)).toHaveLength(6);
+    // …but every one of them cleans to nothing for display
+    expect(commentsOf(game.items).every((c) => cleanComment(c.text) === "")).toBe(true);
   });
 
   it("keeps the text and strips the annotations in mixed eval/clock comments", () => {
@@ -34,8 +42,9 @@ describe("real-world PGN", () => {
 
 1. d4 { [%eval 0.17] [%clk 0:10:00] A quiet start } d5 { [%eval 0.12] } *`;
     const game = parsePGN(pgn);
-    expect(game.moves[0].comment).toBe("A quiet start");
-    expect(game.moves[1].comment).toBeUndefined();
+    const comments = commentsOf(game.items);
+    expect(cleanComment(comments[0].text)).toBe("A quiet start");
+    expect(cleanComment(comments[1].text)).toBe("");
   });
 
   it("parses a study export with nested variations, NAGs and comments", () => {
@@ -46,26 +55,32 @@ describe("real-world PGN", () => {
 ( 3... Nf6 $5 { Berlin } 4. O-O Nxe4 ( 4... Bc5 ) 5. d4 )
 4. Ba4 Nf6 5. O-O *`;
     const game = parsePGN(pgn);
-    expect(game.moves[5].san).toBe("a6");
-    expect(game.moves[5].nags).toContain(1);
-    expect(game.moves[5].comment).toBe("Morphy Defence");
-    const berlin = game.moves[5].variations![0];
-    expect(berlin.map((m) => m.san)).toEqual(["Nf6", "O-O", "Nxe4", "d4"]);
-    expect(berlin[0].nags).toContain(5);
-    expect(berlin[0].comment).toBe("Berlin");
+    const moves = movesOf(game.items);
+    expect(moves[5].san).toBe("a6");
+    expect(moves[5].nags).toContain(1);
+    // "{ Morphy Defence }" is the stream item right after a6
+    const a6Index = game.items.indexOf(moves[5]);
+    expect(game.items[a6Index + 1]).toMatchObject({ kind: "comment", text: "Morphy Defence" });
+
+    const berlin = variationsOf(game.items)[0];
+    const berlinMoves = movesOf(berlin.items);
+    expect(berlinMoves.map((m) => m.san)).toEqual(["Nf6", "O-O", "Nxe4", "d4"]);
+    expect(berlinMoves[0].nags).toContain(5);
+    expect(berlin.items[1]).toMatchObject({ kind: "comment", text: "Berlin" });
     // nested variation on 4. O-O Nxe4 -> (4... Bc5)
-    expect(berlin[2].variations![0].map((m) => m.san)).toEqual(["Bc5"]);
+    const nested = variationsOf(berlin.items)[0];
+    expect(movesOf(nested.items).map((m) => m.san)).toEqual(["Bc5"]);
   });
 
   it("parses higher-numbered NAGs ($14 unclear, $16 advantage)", () => {
     const game = parsePGN("[Result \"*\"]\n\n1. e4 $14 e5 $16 *");
-    expect(game.moves[0].nags).toEqual([14]);
-    expect(game.moves[1].nags).toEqual([16]);
+    expect(movesOf(game.items)[0].nags).toEqual([14]);
+    expect(movesOf(game.items)[1].nags).toEqual([16]);
   });
 
   it("preserves -- and Z0 null moves distinctly (round-trip fidelity)", () => {
     const game = parsePGN("[Result \"*\"]\n\n1. e4 -- 2. d4 Z0 *");
-    expect(game.moves.map((m) => m.san)).toEqual(["e4", "--", "d4", "Z0"]);
+    expect(movesOf(game.items).map((m) => m.san)).toEqual(["e4", "--", "d4", "Z0"]);
   });
 
   it("parses a multi-game database export (PGN with several games)", () => {
@@ -87,6 +102,6 @@ describe("real-world PGN", () => {
     expect(games[0].headers["White"]).toBe("Carlsen, Magnus");
     expect(games[0].result).toBe("1/2-1/2");
     expect(games[1].headers["Black"]).toBe("Ding, Liren");
-    expect(games[1].moves.map((m) => m.san)).toEqual(["e4", "c5", "Nf3", "d6"]);
+    expect(movesOf(games[1].items).map((m) => m.san)).toEqual(["e4", "c5", "Nf3", "d6"]);
   });
 });

@@ -1,4 +1,4 @@
-import type { Color, PgnNode, PgnGameAst } from "./types";
+import type { Color, PgnItem, PgnNode, PgnGameAst } from "./types";
 
 // ---------------------------------------------------------------------------
 // pgn-editor — clean-room PGN parser
@@ -70,18 +70,6 @@ function readComment(c: Cursor): string | null {
   return null;
 }
 
-// Read zero or more consecutive comments, joined with a space (rare but legal).
-function readComments(c: Cursor): string | undefined {
-  let acc: string | undefined;
-  for (;;) {
-    skipSpace(c);
-    const cm = readComment(c);
-    if (cm === null) break;
-    acc = acc ? `${acc} ${cm}` : cm;
-  }
-  return acc;
-}
-
 // Read one NAG ("$7" or a glyph) if present, else null.
 function readNag(c: Cursor): number | null {
   if (c.s[c.i] === "$") {
@@ -141,14 +129,20 @@ function advance(t: Turn): Turn {
 // Parse a movetext line until ")" (variation close), a result token, or EOF.
 // `start` seeds the side/number for the first ply (a variation inherits these
 // from the move it replaces). The result token, if any, is returned separately.
-function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string | null } {
-  const moves: PgnNode[] = [];
+//
+// The line is read as a flat token stream and emitted as one: comments and
+// variations become items in source order, with no attribution to a move. The
+// one read that attaches to a move is the NAG, because the spec binds it to
+// the move immediately prior. Move number indicators only update the running
+// side/number — they are decoration, so "1. { x } e4" and "{ x } 1. e4" parse
+// to the same stream.
+function parseLine(c: Cursor, start: Turn): { items: PgnItem[]; result: string | null } {
+  const items: PgnItem[] = [];
   let turn = start;
+  let lastMove: PgnNode | null = null;
   let result: string | null = null;
 
   for (;;) {
-    // Comments before the move number become the next ply's commentMove.
-    const commentMove = readComments(c);
     skipSpace(c);
     if (eof(c) || c.s[c.i] === ")") break;
 
@@ -158,13 +152,46 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
       break;
     }
 
-    // Optional move number (corrects running side/number via the ellipsis).
-    const mn = readMoveNumber(c);
-    if (mn) turn = { color: mn.color, num: mn.num };
+    const cm = readComment(c);
+    if (cm !== null) {
+      items.push({ kind: "comment", text: cm });
+      continue;
+    }
 
-    // Comments between the number and the SAN.
-    const commentBefore = readComments(c);
-    skipSpace(c);
+    if (c.s[c.i] === "(") {
+      c.i++; // consume "("
+      // A variation replaces the move immediately prior, so it replays from
+      // that move's own side/number.
+      const sub = parseLine(c, lastMove ? { color: lastMove.color, num: lastMove.moveNumber } : turn);
+      skipSpace(c);
+      if (c.s[c.i] === ")") c.i++; // consume ")"
+      if (lastMove === null) {
+        // A RAV with no preceding move has nothing to unplay (invalid PGN).
+        if (c.strict) throw new Error(`PGN: variation with no preceding move at ${c.i}`);
+        continue; // lenient: drop it; it cannot be anchored
+      }
+      if (sub.items.length > 0) items.push({ kind: "variation", items: sub.items });
+      continue;
+    }
+
+    const nag = readNag(c);
+    if (nag !== null) {
+      if (lastMove === null) {
+        if (c.strict) throw new Error(`PGN: NAG with no preceding move at ${c.i}`);
+        continue; // lenient: drop it
+      }
+      lastMove.nags.push(nag);
+      continue;
+    }
+
+    // A move number only corrects the running side/number (the ellipsis form
+    // announces black); whatever follows it — comments, the SAN — is read as
+    // its own token on the next pass.
+    const mn = readMoveNumber(c);
+    if (mn) {
+      turn = { color: mn.color, num: mn.num };
+      continue;
+    }
 
     const san = readSan(c);
     if (san === null) {
@@ -178,45 +205,13 @@ function parseLine(c: Cursor, start: Turn): { moves: PgnNode[]; result: string |
       continue;
     }
 
-    const node: PgnNode = { san, moveNumber: turn.num, color: turn.color, nags: [], variations: [] };
-    if (commentMove) node.commentMove = commentMove;
-    if (commentBefore) node.commentBefore = commentBefore;
-
-    // After the SAN: NAGs and the after-comment may interleave.
-    let commentAfter: string | undefined;
-    for (;;) {
-      skipSpace(c);
-      const nag = readNag(c);
-      if (nag !== null) {
-        node.nags.push(nag);
-        continue;
-      }
-      const cm = readComment(c);
-      if (cm !== null) {
-        commentAfter = commentAfter ? `${commentAfter} ${cm}` : cm;
-        continue;
-      }
-      break;
-    }
-    if (commentAfter) node.commentAfter = commentAfter;
-
-    // Variations branch from this ply's parent — i.e. they are alternatives to
-    // THIS move, so they start at this ply's side/number.
-    for (;;) {
-      skipSpace(c);
-      if (c.s[c.i] !== "(") break;
-      c.i++; // consume "("
-      const sub = parseLine(c, { color: turn.color, num: turn.num });
-      skipSpace(c);
-      if (c.s[c.i] === ")") c.i++; // consume ")"
-      if (sub.moves.length > 0) node.variations.push(sub.moves);
-    }
-
-    moves.push(node);
+    const node: PgnNode = { kind: "move", san, moveNumber: turn.num, color: turn.color, nags: [] };
+    items.push(node);
+    lastMove = node;
     turn = advance(turn);
   }
 
-  return { moves, result };
+  return { items, result };
 }
 
 // Strip and parse leading [Tag "value"] header lines; returns the headers (in
@@ -248,6 +243,6 @@ export function parse(input: string, opts?: { strict?: boolean }): PgnGameAst {
   // A game with a [FEN] for a black-to-move start still numbers its first ply as
   // white unless the movetext says otherwise; the running side self-corrects on
   // the first explicit number/ellipsis. Top level seeds white / move 1.
-  const { moves, result } = parseLine(c, { color: "w", num: 1 });
-  return { headers, moves, result: result ?? "*" };
+  const { items, result } = parseLine(c, { color: "w", num: 1 });
+  return { headers, items, result: result ?? "*" };
 }

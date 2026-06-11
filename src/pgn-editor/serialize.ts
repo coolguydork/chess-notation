@@ -1,11 +1,13 @@
-import type { PgnNode, PgnGameAst } from "./types";
+import type { PgnItem, PgnGameAst } from "./types";
 
 // ---------------------------------------------------------------------------
 // pgn-editor — serializer (AST -> PGN text)
 //
-// Round-trips parse(): headers, all three comment positions, NAGs, nested
-// variations, and the result token. Unlike the current core serializeMoveTree
-// (after-move comments only, no headers) this preserves full comment fidelity.
+// Round-trips parse(): the item stream is emitted in source order, so comments
+// and variations come back exactly where they were written — no re-anchoring,
+// no merging. The only normalisation is the move-number indicator: a black ply
+// is renumbered ("1... e5") after any comment or variation so the text stays
+// unambiguous on re-parse.
 // ---------------------------------------------------------------------------
 
 function headerTags(headers: Record<string, string>): string[] {
@@ -17,47 +19,42 @@ function headerTags(headers: Record<string, string>): string[] {
 
 // Emit one line (mainline or a variation body). `needsNumber` forces the move
 // number on the first ply even when it's black (variations / post-comment).
-function serializeLine(moves: PgnNode[], out: string[], needsNumber: boolean): void {
+function serializeLine(items: PgnItem[], out: string[], needsNumber: boolean): void {
   let showNumber = needsNumber;
 
-  for (const m of moves) {
-    if (m.commentMove) {
-      out.push(`{ ${m.commentMove} }`);
-      showNumber = true;
-    }
-
-    if (m.color === "w") {
-      out.push(`${m.moveNumber}.`);
-      showNumber = false;
-    } else if (showNumber) {
-      out.push(`${m.moveNumber}...`);
-      showNumber = false;
-    }
-
-    if (m.commentBefore) out.push(`{ ${m.commentBefore} }`);
-
-    out.push(m.san);
-
-    for (const n of m.nags) out.push(`$${n}`);
-
-    if (m.commentAfter) {
-      out.push(`{ ${m.commentAfter} }`);
+  for (const it of items) {
+    if (it.kind === "comment") {
+      out.push(`{ ${it.text} }`);
       showNumber = true; // a comment breaks the run; renumber the next ply
+      continue;
     }
 
-    for (const variation of m.variations) {
+    if (it.kind === "variation") {
       const inner: string[] = [];
-      serializeLine(variation, inner, true);
+      serializeLine(it.items, inner, true);
       out.push(`( ${inner.join(" ")} )`);
       showNumber = true; // a variation also breaks the run
+      continue;
     }
+
+    if (it.color === "w") {
+      out.push(`${it.moveNumber}.`);
+      showNumber = false;
+    } else if (showNumber) {
+      out.push(`${it.moveNumber}...`);
+      showNumber = false;
+    }
+
+    out.push(it.san);
+
+    for (const n of it.nags) out.push(`$${n}`);
   }
 }
 
-// Movetext only (no headers) — the analogue of core's serializeMoveTree.
+// Movetext only (no headers).
 export function serializeMovetext(game: PgnGameAst): string {
   const out: string[] = [];
-  serializeLine(game.moves, out, true);
+  serializeLine(game.items, out, true);
   out.push(game.result);
   return out.join(" ");
 }

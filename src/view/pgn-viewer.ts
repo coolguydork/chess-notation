@@ -1,10 +1,15 @@
 import { buildMoveListHtml, buildHeaderHtml } from "../render/controls";
-import { findNodeById, nodeToPath, pathToNode } from "../core/tree";
-import { addMoveAt, removeAt, projectGame, promoteVariation, setComment, setNags } from "../core/game";
+import { findNodeById, findCommentById, nodeToPath, pathToNode } from "../core/tree";
+import {
+  addMoveAt, removeAt, projectGame, promoteVariation, setNags,
+  adjacentComment, setAdjacentComment, updateComment,
+} from "../core/game";
 import type { GameEditor } from "../core/game";
+import { cleanComment } from "../core/pgn";
 import { mountCmBoard } from "./cm-board";
 import type { InteractiveBoardHandle } from "./board-handle";
 import type { MoveNode, BoardState } from "../core/types";
+import type { PgnComment } from "../pgn-editor";
 import type { BoardConfig, EngineArrow } from "../render/config";
 import type { PvMove } from "../core/engine";
 
@@ -23,6 +28,16 @@ interface PgnViewerState {
 }
 
 export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
+
+// What a comment context-menu action operates on. Comments have no owning
+// move: the target is the comment item itself (addressed by identity), with
+// `anchor` only naming the board position it sits at and `text` the display
+// text for seeding the modal.
+export interface CommentTarget {
+  comment: PgnComment;
+  text: string;
+  anchor: MoveNode;
+}
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -63,7 +78,7 @@ export class PgnViewer {
   // in plugin/; the viewer only detects the trigger and owns the edit ops).
   private moveMenuHandler: ((node: MoveNode, isVariationHead: boolean, evt: MouseEvent) => void) | null = null;
   // Plugin-supplied handler that raises the per-comment context menu (edit / delete).
-  private commentMenuHandler: ((node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void) | null = null;
+  private commentMenuHandler: ((target: CommentTarget, evt: MouseEvent) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -168,17 +183,16 @@ export class PgnViewer {
       }
       const commentDel = t.closest<HTMLElement>("[data-comment-delete-id]");
       if (commentDel) {
-        const n = findNodeById(this.state.root, Number(commentDel.dataset.commentDeleteId));
-        const slot = commentDel.dataset.commentDeleteSlot === "before" ? "before" : "after";
-        if (n) this.setCommentOn(n, "", slot);
+        const found = findCommentById(this.state.root, Number(commentDel.dataset.commentDeleteId));
+        if (found) this.updateCommentOn(found.comment.source, "");
         return;
       }
-      // A comment belongs to its move — clicking it navigates there, just like
-      // clicking the move itself (the × above is handled first, so it still deletes).
+      // A comment sits at a board position — clicking it navigates there (the
+      // × above is handled first, so it still deletes).
       const commentId = t.closest<HTMLElement>("[data-comment-id]")?.dataset.commentId;
       if (commentId) {
-        const n = findNodeById(this.state.root, Number(commentId));
-        if (n) this.goTo(n);
+        const found = findCommentById(this.state.root, Number(commentId));
+        if (found) this.goTo(found.anchor);
         return;
       }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
@@ -198,11 +212,13 @@ export class PgnViewer {
       // nested inside move spans, so the two data attributes never collide.
       const commentEl = target.closest<HTMLElement>("[data-comment-id]");
       if (commentEl && this.commentMenuHandler) {
-        const node = findNodeById(this.state.root, Number(commentEl.dataset.commentId));
-        const slot = commentEl.dataset.commentSlot === "before" ? "before" : "after";
-        if (node) {
+        const found = findCommentById(this.state.root, Number(commentEl.dataset.commentId));
+        if (found) {
           e.preventDefault();
-          this.commentMenuHandler(node, slot, e);
+          this.commentMenuHandler(
+            { comment: found.comment.source, text: found.comment.text, anchor: found.anchor },
+            e,
+          );
           return;
         }
       }
@@ -279,7 +295,7 @@ export class PgnViewer {
   }
 
   // Register the handler that raises the per-comment context menu (plugin-supplied).
-  setCommentMenuHandler(fn: (node: MoveNode, slot: "before" | "after", evt: MouseEvent) => void): void {
+  setCommentMenuHandler(fn: (target: CommentTarget, evt: MouseEvent) => void): void {
     this.commentMenuHandler = fn;
   }
 
@@ -504,13 +520,28 @@ export class PgnViewer {
     this.refreshAfterEdit();
   }
 
-  // Set/clear a comment on `node` (empty string clears). `where` selects the
-  // render position: "after" the move (default) or "before" it. These map to the
-  // AST's commentAfter / commentMove slots.
-  setCommentOn(node: MoveNode, text: string, where: "before" | "after" = "after"): void {
+  // Set/replace/clear the comment item directly adjacent to `node` in the
+  // stream (empty string clears). This is the authoring path: "write a comment
+  // right before/after this move" — position chosen by the user, no ownership.
+  setAdjacentCommentOn(node: MoveNode, side: "before" | "after", text: string): void {
     if (!this.editor) return;
-    const field = where === "before" ? "commentMove" : "commentAfter";
-    setComment(this.editor, nodeToPath(node), field, text);
+    setAdjacentComment(this.editor, nodeToPath(node), side, text);
+    this.refreshAfterEdit();
+  }
+
+  // Display text of the comment item directly adjacent to `node` ("" if none) —
+  // used to seed the comment modal so authoring edits in place.
+  adjacentCommentTextOf(node: MoveNode, side: "before" | "after"): string {
+    if (!this.editor) return "";
+    const item = adjacentComment(this.editor, nodeToPath(node), side);
+    return item ? cleanComment(item.text) : "";
+  }
+
+  // Replace the text of an existing comment item (addressed by identity);
+  // empty string removes it.
+  updateCommentOn(comment: PgnComment, text: string): void {
+    if (!this.editor) return;
+    updateComment(this.editor, comment, text);
     this.refreshAfterEdit();
   }
 

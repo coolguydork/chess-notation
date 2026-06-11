@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { parseGames, hasTopLevelResult } from "../../src/pgn-editor/parseGames";
+import { isMove, isVariation } from "../../src/pgn-editor/types";
+import type { PgnItem, PgnNode } from "../../src/pgn-editor/types";
+
+const moves = (items: PgnItem[]): PgnNode[] => items.filter(isMove);
 
 describe("pgn-editor parseGames", () => {
   it("returns a single game for ordinary PGN", () => {
     const games = parseGames("1. e4 e5 *");
     expect(games).toHaveLength(1);
-    expect(games[0].moves.map((m) => m.san)).toEqual(["e4", "e5"]);
+    expect(moves(games[0].items).map((m) => m.san)).toEqual(["e4", "e5"]);
   });
 
   it("returns [] for empty / whitespace input", () => {
@@ -25,10 +29,10 @@ describe("pgn-editor parseGames", () => {
     expect(games).toHaveLength(2);
     expect(games[0].headers.White).toBe("Alice");
     expect(games[0].result).toBe("1-0");
-    expect(games[0].moves.map((m) => m.san)).toEqual(["e4", "e5"]);
+    expect(moves(games[0].items).map((m) => m.san)).toEqual(["e4", "e5"]);
     expect(games[1].headers.White).toBe("Carol");
     expect(games[1].result).toBe("0-1");
-    expect(games[1].moves.map((m) => m.san)).toEqual(["d4", "d5"]);
+    expect(moves(games[1].items).map((m) => m.san)).toEqual(["d4", "d5"]);
   });
 
   it("splits headerless games on result tokens", () => {
@@ -44,13 +48,14 @@ describe("pgn-editor parseGames", () => {
   it("does not split on a result token inside a comment", () => {
     const games = parseGames("1. e4 e5 { White wins 1-0 here } 2. Nf3 1-0");
     expect(games).toHaveLength(1);
-    expect(games[0].moves.map((m) => m.san)).toEqual(["e4", "e5", "Nf3"]);
+    expect(moves(games[0].items).map((m) => m.san)).toEqual(["e4", "e5", "Nf3"]);
   });
 
   it("does not split inside a variation", () => {
     const games = parseGames("1. e4 e5 (1... c5 2. Nf3) 2. Nf3 1-0");
     expect(games).toHaveLength(1);
-    expect(games[0].moves[1].variations[0].map((m) => m.san)).toEqual(["c5", "Nf3"]);
+    const variation = games[0].items.find(isVariation)!;
+    expect(moves(variation.items).map((m) => m.san)).toEqual(["c5", "Nf3"]);
   });
 
   it("keeps a ']' inside a quoted header value (quote-aware split)", () => {

@@ -30,7 +30,7 @@ Flow: `core → render → view → plugin`. New interaction logic (pointer/drag
 `pgn-editor/` is a leaf: `core/` may import it, it imports nothing (no `core/`/render/view/plugin/Obsidian/DOM — enforced by `tests/pgn-editor/boundary.test.ts`). It's a clean-room, MIT, variation-aware PGN parsing/serializing core, kept liftable into its own package.
 
 ### `core/` — Chess logic
-- Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN parse via our `pgn-editor` core, adapted to `PgnGame`; also holds `serializeMoveTree`), `moves.ts` / `legal.ts` (move application + legal moves, delegated to `chess.js` via `chessjs-bridge.ts`), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
+- Board state, rules, move generation: `fen.ts` (FEN parse/serialize), `pgn.ts` (PGN parse via our `pgn-editor` core, adapted to `PgnGame`), `moves.ts` / `legal.ts` (move application + legal moves, delegated to `chess.js` via `chessjs-bridge.ts`), `tree.ts` (move-tree builders), `engine.ts` (UCI engine logic).
 - `game.ts` — `GameEditor`: owns the **editable** game as a `pgn-editor` AST (load, add/remove moves, serialize), with `chess.js` as the sole rules engine for validation/numbering. All PGN *edits* go through it; it projects to a read-only `MoveNode` tree for rendering. Plain holder + functions, no class (core/ convention).
 - No DOM, no Obsidian, no side effects. Functions are pure except `GameEditor`'s edit ops, which mutate the AST in place.
 
@@ -187,7 +187,7 @@ A test vault lives at `test-vault/`. To use it:
 ```bash
 npm install
 npm run build      # esbuild bundle → dist/main.js + dist/styles.css
-npm test           # vitest unit tests (443 tests across 23 suites)
+npm test           # vitest unit tests (466 tests across 23 suites)
 npm run dev        # watch mode
 ```
 
