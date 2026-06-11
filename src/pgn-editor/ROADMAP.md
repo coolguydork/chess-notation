@@ -75,6 +75,34 @@ a general-purpose package. Build on demand, not speculatively:
 - Typed get/set/delete with Seven-Tag-Roster awareness.
 - Validation: `Result` enum, `Date` (`YYYY.MM.DD` / `??`), FEN well-formedness.
 
+## Known normalizations & extensions (the complete inventory)
+
+Everything that carries meaning follows the spec with no added interpretation:
+comments are positional stream items (§5 places them, assigns no attachment),
+NAGs bind to "the move just played" (§10; §8.2.3.8's export example shows the
+adjacency), and RAVs anchor by "unplaying the move that appears immediately
+prior" (§8.2.5). Beyond that, the writer is deliberately *not* a byte-copier —
+these are the only deltas, all lexical or disclosed extensions:
+
+1. **Move numbers are regenerated**, not preserved (§8.2.2: import treats them
+   as optional/redundant; export derives them by rule). "1. { x } e4" exports
+   as "{ x } 1. e4".
+2. **A NAG written after a variation re-emits adjacent to its move** — the one
+   token we reposition; follows from §10 but that input placement is unaddressed
+   by the spec.
+3. **Comment form normalizes, content doesn't**: `;`-comments re-emit as brace
+   comments; internal whitespace collapses to single spaces (single-line YAML
+   write-back target). Text is never altered, merged, or moved; `[%clk]`/`[%eval]`
+   pass through verbatim and are never parsed here (stripping is display-only,
+   in core/).
+4. **Null moves `--`/`Z0`** are accepted and round-tripped — an extension; the
+   spec has no null move.
+5. **Output is valid import format, not export-format file discipline**: no
+   80-column wrap (§8.2.1), headers in source order rather than Seven-Tag-Roster
+   export order. Revisit if this lifts into a standalone package.
+6. **Lenient mode drops unparseable tokens** (the spec's import tolerance);
+   the editor uses strict mode so write-back never operates on a guessed parse.
+
 ## Guardrails (do not regress these)
 - **FEN-neutral**: items carry SAN/numbers/NAGs/comments/variations only — never
   `BoardState` or board indices. Rules/legality stay in chess.js on the core side.
