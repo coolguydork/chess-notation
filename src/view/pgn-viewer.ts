@@ -1,4 +1,4 @@
-import { buildMoveListHtml, buildHeaderHtml } from "../render/controls";
+import { buildMoveListEl, buildHeaderEl } from "../render/controls";
 import { findNodeById, findCommentById, nodeToPath, pathToNode } from "../core/tree";
 import {
   addMoveAt, removeAt, projectGame, promoteVariation, setNags,
@@ -208,7 +208,7 @@ export class PgnViewer {
     });
 
     // Move list: context menu (right-click / long-press) for editing a move.
-    // Delegated on the stable container so it survives innerHTML re-renders.
+    // Delegated on the stable container so it survives move-list re-renders.
     this.moveListEl.addEventListener("contextmenu", (e) => {
       if (!this.editor) return;
       const target = e.target as HTMLElement;
@@ -320,8 +320,10 @@ export class PgnViewer {
     const color = this.state.current.state.activeColor;
     this.turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
-    this.headersEl.innerHTML = buildHeaderHtml(this.state.headers);
-    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined, this.state.selectedCommentId);
+    const headerEl = buildHeaderEl(this.state.headers);
+    this.headersEl.replaceChildren(...(headerEl ? [headerEl] : []));
+    const listEl = buildMoveListEl(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined, this.state.selectedCommentId);
+    this.moveListEl.replaceChildren(...(listEl ? [listEl] : []));
     this.fitMoveListHeight();
     this.scrollActiveMoveIntoView();
   }

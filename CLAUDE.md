@@ -14,7 +14,7 @@ Nothing in a lower layer may import from a layer above it.
 src/
   pgn-editor/ — self-contained PGN parse/serialize + FEN-neutral AST; imports nothing else
   core/     — pure chess logic, no UI, no Obsidian
-  render/   — board config/themes and controls (HTML), no Obsidian
+  render/   — board config/themes and controls (DOM), no Obsidian
   view/     — DOM-aware interaction logic, no Obsidian
   plugin/   — Obsidian glue; wires core + render + view into the plugin lifecycle
 tests/
@@ -36,7 +36,7 @@ Flow: `core → render → view → plugin`. New interaction logic (pointer/drag
 
 ### `render/` — Board config & controls
 - `config.ts` — `BoardConfig`, highlight/arrow types, and the `BOARD_THEMES` presets. The board SVG itself is drawn by cm-chessboard, mounted from `view/cm-board.ts` with this config (the homemade SVG board was retired in the cm-chessboard migration).
-- `controls.ts` — `buildHeaderHtml()` / `buildMoveListHtml()` (PGN viewer HTML); consumes the `core/tree.ts` move tree, never builds one.
+- `controls.ts` — `buildHeaderEl()` / `buildMoveListEl()` (PGN viewer DOM; built with `createElement`/`textContent`, never HTML strings — community-plugin guideline); consumes the `core/tree.ts` move tree, never builds one.
 - No Obsidian imports — usable in a plain browser or test environment. Piece assets referenced by injected path/URL, never hardcoded.
 
 ### `plugin/` — Obsidian integration

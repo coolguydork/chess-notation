@@ -217,7 +217,7 @@ class CommentModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: this.title });
+    this.setTitle(this.title);
     const input = contentEl.createEl("textarea", { cls: "chess-comment-input" });
     input.value = this.initial;
     input.rows = 3;
@@ -255,7 +255,7 @@ class ImportPgnModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Insert chess board from PGN" });
+    this.setTitle("Insert chess board from PGN");
     contentEl.createEl("p", {
       text: "Paste a PGN below. Apostrophes, colons, and line breaks are handled for you.",
       cls: "chess-import-hint",
@@ -309,8 +309,16 @@ const viewerPositionCache = new Map<string, string[]>();
 // PGN write-back
 // Serializes the live MoveNode tree and overwrites the pgn: line in the
 // source file. Silently no-ops when called outside a file context (e.g.
-// hover previews) or when the block has no pgn: key.
+// hover previews) or when the block has no pgn: key. All write-backs go
+// through Vault.process: it reads and writes atomically, so a concurrent
+// edit by Obsidian or another plugin can't be clobbered.
 // ---------------------------------------------------------------------------
+
+// Resolve the block's source file, or null outside a file context.
+function blockFile(app: App, ctx: MarkdownPostProcessorContext): TFile | null {
+  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
+  return abstract instanceof TFile ? abstract : null;
+}
 
 async function writeBackPgn(
   app: App,
@@ -321,15 +329,15 @@ async function writeBackPgn(
   const info = ctx.getSectionInfo(el);
   if (!info) return;
 
-  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
-  if (!(abstract instanceof TFile)) return;
+  const file = blockFile(app, ctx);
+  if (!file) return;
 
-  const content = await app.vault.read(abstract);
-  const lines = content.split("\n");
-
-  if (replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)) {
-    await app.vault.modify(abstract, lines.join("\n"));
-  }
+  await app.vault.process(file, (content) => {
+    const lines = content.split("\n");
+    return replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)
+      ? lines.join("\n")
+      : content;
+  });
 }
 
 // Write-back for FEN-only blocks: updates an existing pgn: line or inserts
@@ -343,29 +351,28 @@ async function writeBackFenBlock(
   const info = ctx.getSectionInfo(el);
   if (!info) return;
 
-  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
-  if (!(abstract instanceof TFile)) return;
+  const file = blockFile(app, ctx);
+  if (!file) return;
 
-  const content = await app.vault.read(abstract);
-  const lines = content.split("\n");
+  await app.vault.process(file, (content) => {
+    const lines = content.split("\n");
 
-  if (replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)) {
-    await app.vault.modify(abstract, lines.join("\n"));
-    return;
-  }
-
-  // No pgn: line yet — insert one after the fen: line
-  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
-    if (/^\s*fen\s*:/.test(lines[i])) {
-      lines.splice(i + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
-      await app.vault.modify(abstract, lines.join("\n"));
-      return;
+    if (replacePgnValue(lines, info.lineStart + 1, info.lineEnd, newPgn)) {
+      return lines.join("\n");
     }
-  }
 
-  // No fen: or pgn: line — empty block; insert right after the opening fence
-  lines.splice(info.lineStart + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
-  await app.vault.modify(abstract, lines.join("\n"));
+    // No pgn: line yet — insert one after the fen: line
+    for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
+      if (/^\s*fen\s*:/.test(lines[i])) {
+        lines.splice(i + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
+        return lines.join("\n");
+      }
+    }
+
+    // No fen: or pgn: line — empty block; insert right after the opening fence
+    lines.splice(info.lineStart + 1, 0, `pgn: ${yamlInlineScalar(newPgn)}`);
+    return lines.join("\n");
+  });
 }
 
 // Write-back for orientation changes: updates the `orientation:` line in the
@@ -379,23 +386,23 @@ async function writeBackOrientation(
   const info = ctx.getSectionInfo(el);
   if (!info) return;
 
-  const abstract = app.vault.getAbstractFileByPath(ctx.sourcePath);
-  if (!(abstract instanceof TFile)) return;
+  const file = blockFile(app, ctx);
+  if (!file) return;
 
-  const content = await app.vault.read(abstract);
-  const lines = content.split("\n");
+  await app.vault.process(file, (content) => {
+    const lines = content.split("\n");
 
-  for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
-    if (/^\s*orientation\s*:/.test(lines[i])) {
-      lines[i] = `orientation: ${orientation}`;
-      await app.vault.modify(abstract, lines.join("\n"));
-      return;
+    for (let i = info.lineStart + 1; i < info.lineEnd; i++) {
+      if (/^\s*orientation\s*:/.test(lines[i])) {
+        lines[i] = `orientation: ${orientation}`;
+        return lines.join("\n");
+      }
     }
-  }
 
-  // No orientation: line yet — insert right after the opening fence
-  lines.splice(info.lineStart + 1, 0, `orientation: ${orientation}`);
-  await app.vault.modify(abstract, lines.join("\n"));
+    // No orientation: line yet — insert right after the opening fence
+    lines.splice(info.lineStart + 1, 0, `orientation: ${orientation}`);
+    return lines.join("\n");
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -472,7 +479,7 @@ class ChessSettingTab extends PluginSettingTab {
           });
       });
 
-    containerEl.createEl("h3", { text: "Engine" });
+    new Setting(containerEl).setName("Engine").setHeading();
 
     new Setting(containerEl)
       .setName("Engine binary path")
@@ -516,7 +523,7 @@ class ChessSettingTab extends PluginSettingTab {
           });
       });
 
-    containerEl.createEl("h4", { text: "Engine options" });
+    new Setting(containerEl).setName("Engine options").setHeading();
 
     // Options the plugin manages through its own dedicated settings.
     const PLUGIN_MANAGED = new Set(["MultiPV"]);
