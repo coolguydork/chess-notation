@@ -337,20 +337,13 @@ describe("buildMoveListHtml", () => {
       expect(html.indexOf("gambit try")).toBeLessThan(html.indexOf(">c5<"));
     });
 
-    it("renders a mid comment between the move number and the move", () => {
+    it("renders a comment written between the number and the SAN as a before-item", () => {
+      // Move numbers are decoration: "1. { sharpest } e4" reads as a comment
+      // before e4, so it renders ahead of the move number like any before-item.
       const r = buildMoveTree(STARTING_FEN, pgnItems("1. { sharpest } e4 e5"));
       const html = buildMoveListHtml(r, r.id);
-      const numberPos = html.indexOf("1.");
-      const commentPos = html.indexOf("sharpest");
-      const e4Pos = html.indexOf(">e4<");
-      expect(commentPos).toBeGreaterThan(numberPos);
-      expect(commentPos).toBeLessThan(e4Pos);
-      expect(html).toContain(`data-comment-slot="mid"`);
-    });
-
-    it("does not re-show the move number after a mid comment", () => {
-      const r = buildMoveTree(STARTING_FEN, pgnItems("1. { hmm } e4 e5"));
-      expect(buildMoveListHtml(r, r.id)).not.toContain("1…");
+      expect(html.indexOf("sharpest")).toBeLessThan(html.indexOf(">e4<"));
+      expect(html).not.toContain("data-comment-slot");
     });
 
     it("renders comment after NAGs when both are present", () => {

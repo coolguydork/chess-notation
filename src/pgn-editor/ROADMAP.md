@@ -8,8 +8,10 @@ and where each piece stands.
 > comments are standalone tokens and a RAV "unplays the move immediately prior".
 > The AST mirrors that: a line is an ordered `PgnItem[]` of move | comment |
 > variation, position is truth, and serialization re-emits items where they were
-> written — never re-anchored, never merged. The two spec'd exceptions stay on
-> the move: NAGs and the mid comment inside a number–SAN unit ("1. { x } e4").
+> written — never re-anchored, never merged. The one spec'd exception stays on
+> the move: NAGs ("applies to the move immediately prior"). Move number
+> indicators are decoration the export format re-derives, so "1. { x } e4" and
+> "{ x } 1. e4" are the same stream — both export as the latter.
 
 > **Rails-style framing, with one caveat.** A game is *not* one flat record — it's
 > three layers with different shapes: the **game/collection**, the flat
@@ -34,7 +36,6 @@ Structural ops live in `pgn-editor/edit.ts` (FEN-neutral, with the shared stream
 traversal `childrenOf`/`resolvePath`/`nodeAt` — navigation skips comment items;
 variation heads resolve positionally); exposed through `core/game.ts`'s
 `GameEditor` seam:
-- `setMidComment(path, text)` ✓ — set/clear the number–SAN comment on a move.
 - `adjacentComment(path, side)` / `setAdjacentComment(path, side, text)` ✓ —
   read / insert / update / remove the comment item directly before or after a
   move (positional authoring; the same item is one move's after-neighbour and

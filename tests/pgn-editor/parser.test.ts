@@ -72,10 +72,12 @@ describe("pgn-editor parse", () => {
   });
 
   describe("comments — positional stream items", () => {
-    it("keeps comments as items where they were written; mid stays on the move", () => {
+    it("keeps comments as items where they were written", () => {
+      // Move numbers are decoration, so a comment "between the number and the
+      // SAN" is simply a comment before that move: {intro} and {pre} are two
+      // consecutive before-items.
       const g = parse("{intro} 1. {pre} e4 {after} e5 *");
-      expect(shape(g.items)).toEqual(["{intro}", "e4", "{after}", "e5"]);
-      expect(moves(g.items)[0].commentMid).toBe("pre");
+      expect(shape(g.items)).toEqual(["{intro}", "{pre}", "e4", "{after}", "e5"]);
     });
 
     it("parses ;-to-end-of-line comments (gap vs cm-pgn)", () => {
@@ -115,7 +117,7 @@ describe("pgn-editor parse", () => {
       expect(shape(v.items)).toEqual(["{gambit try}", "c5"]);
     });
 
-    it("keeps a dangling mid comment (number with no move) as a comment item", () => {
+    it("keeps a comment after a dangling number (no move follows) as an item", () => {
       const g = parse("1. e4 e5 ( 2. { cut off } ) *");
       const v = variations(g.items)[0];
       expect(shape(v.items)).toEqual(["{cut off}"]);

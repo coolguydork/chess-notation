@@ -70,18 +70,6 @@ function readComment(c: Cursor): string | null {
   return null;
 }
 
-// Read zero or more consecutive comments, joined with a space (rare but legal).
-function readComments(c: Cursor): string | undefined {
-  let acc: string | undefined;
-  for (;;) {
-    skipSpace(c);
-    const cm = readComment(c);
-    if (cm === null) break;
-    acc = acc ? `${acc} ${cm}` : cm;
-  }
-  return acc;
-}
-
 // Read one NAG ("$7" or a glyph) if present, else null.
 function readNag(c: Cursor): number | null {
   if (c.s[c.i] === "$") {
@@ -143,9 +131,11 @@ function advance(t: Turn): Turn {
 // from the move it replaces). The result token, if any, is returned separately.
 //
 // The line is read as a flat token stream and emitted as one: comments and
-// variations become items in source order, with no attribution to a move. Only
-// two reads attach to a move, because their syntax binds them: NAGs (apply to
-// the move immediately prior) and the mid comment inside a number–SAN unit.
+// variations become items in source order, with no attribution to a move. The
+// one read that attaches to a move is the NAG, because the spec binds it to
+// the move immediately prior. Move number indicators only update the running
+// side/number — they are decoration, so "1. { x } e4" and "{ x } 1. e4" parse
+// to the same stream.
 function parseLine(c: Cursor, start: Turn): { items: PgnItem[]; result: string | null } {
   const items: PgnItem[] = [];
   let turn = start;
@@ -194,19 +184,17 @@ function parseLine(c: Cursor, start: Turn): { items: PgnItem[]; result: string |
       continue;
     }
 
-    // Optional move number (corrects running side/number via the ellipsis).
+    // A move number only corrects the running side/number (the ellipsis form
+    // announces black); whatever follows it — comments, the SAN — is read as
+    // its own token on the next pass.
     const mn = readMoveNumber(c);
-    if (mn) turn = { color: mn.color, num: mn.num };
-
-    // Comments between the number and the SAN stay on the move they introduce.
-    const commentMid = readComments(c);
-    skipSpace(c);
+    if (mn) {
+      turn = { color: mn.color, num: mn.num };
+      continue;
+    }
 
     const san = readSan(c);
     if (san === null) {
-      // A mid comment with no SAN after it (dangling number before ")" / EOF):
-      // keep the text as a standalone item so nothing is silently dropped.
-      if (commentMid) items.push({ kind: "comment", text: commentMid });
       if (eof(c) || c.s[c.i] === ")") break;
       if (c.strict) {
         throw new Error(
@@ -218,7 +206,6 @@ function parseLine(c: Cursor, start: Turn): { items: PgnItem[]; result: string |
     }
 
     const node: PgnNode = { kind: "move", san, moveNumber: turn.num, color: turn.color, nags: [] };
-    if (commentMid) node.commentMid = commentMid;
     items.push(node);
     lastMove = node;
     turn = advance(turn);

@@ -145,10 +145,10 @@ describe("parsePGN", () => {
       expect(shape(game.items)).toEqual(["{Opening intro}", "e4", "e5"]);
     });
 
-    it("keeps a between-number-and-move comment on the move (commentMid)", () => {
+    it("treats a comment between the number and the SAN as a before-item", () => {
+      // Move numbers are decoration, so "1. { x } e4" is a comment before e4.
       const game = parsePGN("1. { sharpest } e4 e5 *");
-      expect(movesOf(game.items)[0].commentMid).toBe("sharpest");
-      expect(shape(game.items)).toEqual(["e4", "e5"]);
+      expect(shape(game.items)).toEqual(["{sharpest}", "e4", "e5"]);
     });
 
     it("keeps consecutive comments as separate items (no merging)", () => {

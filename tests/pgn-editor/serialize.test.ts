@@ -39,10 +39,17 @@ describe("pgn-editor serialize", () => {
   it.each([
     "1. e4 ( 1. d4 ) { hi } 1... e5 2. Nf3 *",
     "1. e4 { a } { b } 1... e5 *",
-    "{ intro } 1. { pre } e4 { after } 1... e5 *",
+    "{ intro } { pre } 1. e4 { after } 1... e5 *",
     "1. e4 e5 ( 1... c6 ) { hi } *",
   ])("emits the written text unchanged: %s", (pgn) => {
     expect(serializeMovetext(parse(pgn))).toBe(pgn);
+  });
+
+  it("normalises a comment written between the number and the SAN to before the number", () => {
+    // Move number indicators are decoration (the spec re-derives them), so
+    // "1. { pre } e4" and "{ pre } 1. e4" are the same stream; export emits
+    // the comment before the number. The comment never moves relative to moves.
+    expect(serializeMovetext(parse("1. { pre } e4 e5 *"))).toBe("{ pre } 1. e4 e5 *");
   });
 
   it("round-trips headers including FEN", () => {

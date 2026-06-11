@@ -363,21 +363,6 @@ describe("PgnViewer (state-machine)", () => {
       expect(viewer.adjacentCommentTextOf(root.next!, "before")).toBe("");
     });
 
-    it("setMidCommentOn sets the between-number-and-move comment and emits move", () => {
-      const editor = gameFromPgn("1. e4 e5");
-      const root = projectGame(editor);
-      const { viewer } = makeViewer(root, root, editor);
-      const events: ChangeEvent[] = [];
-      viewer.onChange((e) => events.push(e));
-
-      viewer.setMidCommentOn(root.next!, "mid e4");
-
-      const last = events[events.length - 1];
-      expect(last.reason).toBe("move");
-      expect(last.root.next!.commentMid).toBe("mid e4");
-      expect(tailComments(last.root.next!)).toEqual([]); // no stream item created
-    });
-
     it("updateCommentOn edits an existing comment item by identity and emits move", () => {
       const editor = gameFromPgn("1. e4 { old } 1... e5");
       const root = projectGame(editor);
@@ -415,7 +400,6 @@ describe("PgnViewer (state-machine)", () => {
       viewer.onChange((e) => events.push(e));
       viewer.setNagOn(root.next!, [1]);
       viewer.setAdjacentCommentOn(root.next!, "after", "x");
-      viewer.setMidCommentOn(root.next!, "x");
       viewer.promoteVariationAt(root.next!);
       expect(events).toHaveLength(0);
     });

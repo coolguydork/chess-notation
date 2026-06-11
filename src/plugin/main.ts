@@ -183,26 +183,20 @@ function showMoveMenu(
 
 // Raise the per-comment context menu (right-click an existing comment): edit it
 // in the modal, or delete it. Both route through the viewer, which re-renders
-// and writes back. A standalone comment is addressed by item identity; the mid
-// comment ("1. { x } e4") goes through its move.
+// and writes back. The comment is addressed by item identity — never through a
+// move.
 function showCommentMenu(
   app: App,
   viewer: PgnViewer,
   target: CommentTarget,
   evt: MouseEvent,
 ): void {
-  const mid = target.kind === "mid";
-  const current = mid ? target.node.commentMid ?? "" : target.text;
-  const title = mid ? "Comment between number and move" : "Comment";
-  const save = (text: string): void => {
-    if (mid) viewer.setMidCommentOn(target.node, text);
-    else viewer.updateCommentOn(target.comment, text);
-  };
+  const save = (text: string): void => viewer.updateCommentOn(target.comment, text);
 
   const menu = new Menu();
   menu.addItem((i) =>
     i.setTitle("Edit comment…").setIcon("pencil").onClick(() => {
-      new CommentModal(app, title, current, save).open();
+      new CommentModal(app, "Comment", target.text, save).open();
     }));
   menu.addItem((i) =>
     i.setTitle("Delete comment").setIcon("trash").onClick(() => save("")));

@@ -2,7 +2,7 @@ import { buildMoveListHtml, buildHeaderHtml } from "../render/controls";
 import { findNodeById, findCommentById, nodeToPath, pathToNode } from "../core/tree";
 import {
   addMoveAt, removeAt, projectGame, promoteVariation, setNags,
-  setMidComment, adjacentComment, setAdjacentComment, updateComment,
+  adjacentComment, setAdjacentComment, updateComment,
 } from "../core/game";
 import type { GameEditor } from "../core/game";
 import { cleanComment } from "../core/pgn";
@@ -30,12 +30,14 @@ interface PgnViewerState {
 export type ChangeReason = "navigate" | "move" | "load-game" | "flip";
 
 // What a comment context-menu action operates on. Comments have no owning
-// move: a standalone "item" comment is addressed by identity (its AST item),
-// with `anchor` only naming the board position it sits at. The exception is
-// the mid comment ("1. { x } e4"), which lives inside a move's number–SAN unit.
-export type CommentTarget =
-  | { kind: "mid"; node: MoveNode }
-  | { kind: "item"; comment: PgnComment; text: string; anchor: MoveNode };
+// move: the target is the comment item itself (addressed by identity), with
+// `anchor` only naming the board position it sits at and `text` the display
+// text for seeding the modal.
+export interface CommentTarget {
+  comment: PgnComment;
+  text: string;
+  anchor: MoveNode;
+}
 
 export interface ChangeEvent {
   current: MoveNode;
@@ -181,25 +183,16 @@ export class PgnViewer {
       }
       const commentDel = t.closest<HTMLElement>("[data-comment-delete-id]");
       if (commentDel) {
-        const id = Number(commentDel.dataset.commentDeleteId);
-        if (commentDel.dataset.commentDeleteSlot === "mid") {
-          const n = findNodeById(this.state.root, id);
-          if (n) this.setMidCommentOn(n, "");
-        } else {
-          const found = findCommentById(this.state.root, id);
-          if (found) this.updateCommentOn(found.comment.source, "");
-        }
+        const found = findCommentById(this.state.root, Number(commentDel.dataset.commentDeleteId));
+        if (found) this.updateCommentOn(found.comment.source, "");
         return;
       }
       // A comment sits at a board position — clicking it navigates there (the
       // × above is handled first, so it still deletes).
-      const commentEl = t.closest<HTMLElement>("[data-comment-id]");
-      if (commentEl) {
-        const id = Number(commentEl.dataset.commentId);
-        const n = commentEl.dataset.commentSlot === "mid"
-          ? findNodeById(this.state.root, id)
-          : findCommentById(this.state.root, id)?.anchor ?? null;
-        if (n) this.goTo(n);
+      const commentId = t.closest<HTMLElement>("[data-comment-id]")?.dataset.commentId;
+      if (commentId) {
+        const found = findCommentById(this.state.root, Number(commentId));
+        if (found) this.goTo(found.anchor);
         return;
       }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
@@ -219,25 +212,13 @@ export class PgnViewer {
       // nested inside move spans, so the two data attributes never collide.
       const commentEl = target.closest<HTMLElement>("[data-comment-id]");
       if (commentEl && this.commentMenuHandler) {
-        const id = Number(commentEl.dataset.commentId);
-        let menuTarget: CommentTarget | null = null;
-        if (commentEl.dataset.commentSlot === "mid") {
-          const node = findNodeById(this.state.root, id);
-          if (node) menuTarget = { kind: "mid", node };
-        } else {
-          const found = findCommentById(this.state.root, id);
-          if (found) {
-            menuTarget = {
-              kind: "item",
-              comment: found.comment.source,
-              text: found.comment.text,
-              anchor: found.anchor,
-            };
-          }
-        }
-        if (menuTarget) {
+        const found = findCommentById(this.state.root, Number(commentEl.dataset.commentId));
+        if (found) {
           e.preventDefault();
-          this.commentMenuHandler(menuTarget, e);
+          this.commentMenuHandler(
+            { comment: found.comment.source, text: found.comment.text, anchor: found.anchor },
+            e,
+          );
           return;
         }
       }
@@ -536,13 +517,6 @@ export class PgnViewer {
   promoteVariationAt(node: MoveNode): void {
     if (!this.editor) return;
     promoteVariation(this.editor, nodeToPath(node));
-    this.refreshAfterEdit();
-  }
-
-  // Set/clear the comment inside `node`'s number–SAN unit (empty string clears).
-  setMidCommentOn(node: MoveNode, text: string): void {
-    if (!this.editor) return;
-    setMidComment(this.editor, nodeToPath(node), text);
     this.refreshAfterEdit();
   }
 

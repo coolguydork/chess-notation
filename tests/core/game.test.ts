@@ -6,7 +6,6 @@ import {
   gameToPgn,
   addMoveAt,
   removeAt,
-  setMidComment,
   setAdjacentComment,
   updateComment,
   setNags,
@@ -37,7 +36,6 @@ function expectTreesEqual(a: MoveNode | null, b: MoveNode | null, path = "root")
   expect(a.san, `san at ${path}`).toBe(b.san);
   expect(a.moveNumber, `moveNumber at ${path}`).toBe(b.moveNumber);
   expect(a.color, `color at ${path}`).toBe(b.color);
-  expect(a.commentMid ?? undefined, `commentMid at ${path}`).toBe(b.commentMid ?? undefined);
   expect(tailComments(a), `tail comments at ${path}`).toEqual(tailComments(b));
   expect(a.nags ?? undefined, `nags at ${path}`).toEqual(b.nags ?? undefined);
   expect(serializeFEN(a.state), `state at ${path}`).toBe(serializeFEN(b.state));
@@ -202,18 +200,13 @@ describe("gameToPgn", () => {
     expect(gameToPgn(ed, "*")).toBe("{ intro } 1. e4 e5 *");
   });
 
-  it("writes back a between-number-and-SAN comment (commentMid)", () => {
-    const ed = gameFromPgn("1. e4 e5");
-    setMidComment(ed, ["e4"], "hmm");
-    expect(gameToPgn(ed, "*")).toBe("1. { hmm } e4 e5 *");
-  });
-
   it("round-trips every comment position through serialize -> parse", () => {
     const ed = gameFromPgn("{ intro } 1. { hmm } e4 { ok } e5");
     const reparsed = gameFromPgn(gameToPgn(ed, "*")).items;
     expect(reparsed[0]).toMatchObject({ kind: "comment", text: "intro" });
-    expect(reparsed[1]).toMatchObject({ kind: "move", san: "e4", commentMid: "hmm" });
-    expect(reparsed[2]).toMatchObject({ kind: "comment", text: "ok" });
+    expect(reparsed[1]).toMatchObject({ kind: "comment", text: "hmm" });
+    expect(reparsed[2]).toMatchObject({ kind: "move", san: "e4" });
+    expect(reparsed[3]).toMatchObject({ kind: "comment", text: "ok" });
   });
 
   it("projects a leading comment into the root's tail", () => {

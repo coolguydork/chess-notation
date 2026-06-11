@@ -25,15 +25,13 @@ function makeNode(
   from: number,
   to: number,
   parent: MoveNode | null,
-  nags?: number[],
-  commentMid?: string
+  nags?: number[]
 ): MoveNode {
   return {
     id: _idCounter++,
     san,
     moveNumber,
     color,
-    commentMid,
     nags: nags?.length ? nags : undefined,
     state,
     from,
@@ -72,11 +70,10 @@ function buildLine(parentNode: MoveNode, items: PgnItem[]): void {
       }
       continue;
     }
-    const mid = it.commentMid ? cleanComment(it.commentMid) : "";
     const result = applyMoveEx(cur.state, it.san);
     const node = makeNode(
       it.san, it.moveNumber, it.color, result.state, result.from, result.to,
-      cur, it.nags, mid || undefined
+      cur, it.nags
     );
     cur.next = node;
     cur = node;
@@ -100,12 +97,11 @@ function attachVariation(precedingNode: MoveNode, items: PgnItem[]): void {
   if (!first) return; // comment-only variation: nothing navigable to attach
 
   const base = precedingNode.parent!;
-  const mid = first.commentMid ? cleanComment(first.commentMid) : "";
   const firstResult = applyMoveEx(base.state, first.san);
   const firstNode = makeNode(
     first.san, first.moveNumber, first.color,
     firstResult.state, firstResult.from, firstResult.to,
-    base, first.nags, mid || undefined
+    base, first.nags
   );
   precedingNode.tail.push({ kind: "variation", head: firstNode, lead });
   precedingNode.variationHeads.push(firstNode);

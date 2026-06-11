@@ -3,7 +3,6 @@ import {
   childrenOf,
   resolvePath,
   removeAt as removeItemAt,
-  setMidComment as setItemMidComment,
   adjacentComment as itemAdjacentComment,
   setAdjacentComment as setItemAdjacentComment,
   updateComment as updateItemComment,
@@ -130,13 +129,6 @@ export function addMoveAt(editor: GameEditor, path: string[], san: string): void
 // variation if it is a variation head). Removing the root is a no-op.
 export function removeAt(editor: GameEditor, path: string[]): void {
   removeItemAt(editor.items, path);
-}
-
-// Set/clear the comment inside the number–SAN unit of the move at `path` (the
-// one comment whose syntax binds it to a move). Returns whether the move was
-// found.
-export function setMidComment(editor: GameEditor, path: string[], text: string | null): boolean {
-  return setItemMidComment(editor.items, path, text);
 }
 
 // The comment item directly adjacent to the move at `path`, or null. Adjacency

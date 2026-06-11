@@ -77,18 +77,6 @@ export function nodeAt(items: PgnItem[], path: string[]): PgnNode | null {
 // Update / Delete (structural; no rules engine)
 // ---------------------------------------------------------------------------
 
-// Set/clear the mid comment (inside the move's number–SAN unit) of the move at
-// `path` — the one comment whose syntax binds it to a move. Returns false if
-// the path doesn't resolve to a move.
-export function setMidComment(items: PgnItem[], path: string[], text: string | null): boolean {
-  const node = nodeAt(items, path);
-  if (!node) return false;
-  const trimmed = text?.trim();
-  if (trimmed) node.commentMid = trimmed;
-  else delete node.commentMid;
-  return true;
-}
-
 // The comment item directly adjacent to the move at `path` ("before" = the item
 // immediately preceding it in its line, "after" = immediately following), or
 // null when the neighbour isn't a comment. Adjacency is positional, not

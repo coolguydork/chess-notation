@@ -11,12 +11,14 @@
 // variations in exactly the order the text gives them. The PGN spec assigns
 // no ownership to comments (they are standalone tokens in the stream), so the
 // AST doesn't either: a comment's position IS its meaning, and serialization
-// re-emits it where it was written. Two annotations are move-attached because
-// the spec/syntax binds them to a move: NAGs ("applies to the move immediately
-// prior") and the rare mid comment sitting inside a move's own number–SAN unit
-// ("1. { x } e4"). Variations are stream items too — a RAV "unplays the move
-// immediately prior", so its anchor is positional, recovered by the navigation
-// helpers in edit.ts.
+// re-emits it where it was written. The one move-attached annotation is the
+// NAG, because the spec binds it ("applies to the move immediately prior").
+// Move number indicators are decoration — the spec lets import readers ignore
+// them and export format re-derives them — so a comment "between the number
+// and the SAN" ("1. { x } e4") is simply a comment before that move.
+// Variations are stream items too — a RAV "unplays the move immediately
+// prior", so its anchor is positional, recovered by the navigation helpers in
+// edit.ts.
 //
 // Layer rule: nothing in src/pgn-editor/ may import from core/ render/ view/
 // plugin/ Obsidian or the DOM. Dependencies flow one way: plugin -> pgn-editor.
@@ -44,16 +46,10 @@ export interface PgnNode {
   // NAGs as integers ($1 -> 1, "!!" -> 3, etc.). Empty when none. NAGs stay on
   // the move because the spec binds them to it, unlike comments.
   nags: number[];
-
-  // Comment between the move number and the SAN ("1. { x } e4") — inside the
-  // move's own unit, so its position alone binds it to this move. Raw text,
-  // trimmed; [%clk]/[%eval] annotations are preserved here and only stripped
-  // downstream by the consumer if desired.
-  commentMid?: string;
 }
 
-// A standalone comment in the stream. Raw text, trimmed; [%...] annotations
-// preserved (consumers strip for display if desired).
+// A standalone comment in the stream. Raw text, trimmed; [%clk]/[%eval]
+// annotations preserved (consumers strip for display if desired).
 export interface PgnComment {
   kind: "comment";
   text: string;

@@ -3,7 +3,6 @@ import { parse } from "../../src/pgn-editor/parser";
 import { serializeMovetext } from "../../src/pgn-editor/serialize";
 import {
   nodeAt,
-  setMidComment,
   adjacentComment,
   setAdjacentComment,
   updateComment,
@@ -32,20 +31,6 @@ describe("pgn-editor edit", () => {
       const g = parse("1. e4 ( 1. d4 ) { hi } 1... e5 2. Nf3 *", { strict: true });
       expect(nodeAt(g.items, ["e4", "e5", "Nf3"])?.san).toBe("Nf3");
       expect(nodeAt(g.items, ["d4"])?.san).toBe("d4"); // variation head from the root
-    });
-  });
-
-  describe("setMidComment", () => {
-    it("sets and clears the number–SAN comment", () => {
-      const g = parse("1. e4 e5 *");
-      setMidComment(g.items, ["e4"], "pre");
-      expect(text(g)).toBe("1. { pre } e4 e5 *");
-      setMidComment(g.items, ["e4"], "");
-      expect(text(g)).toBe("1. e4 e5 *");
-    });
-
-    it("returns false for a path that doesn't resolve", () => {
-      expect(setMidComment(parse("1. e4 *").items, ["Nf6"], "x")).toBe(false);
     });
   });
 

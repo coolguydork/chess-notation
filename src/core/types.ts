@@ -76,7 +76,6 @@ export interface MoveNode {
   san: string | null;         // null for the root (initial position)
   moveNumber: number;         // 0 for root
   color: Color | null;        // null for root
-  commentMid?: string;        // comment inside the number–SAN unit (display-cleaned)
   nags?: number[];
   state: BoardState;
   from: number;  // board index of the moving piece's origin (-1 for root/null moves)

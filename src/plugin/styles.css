@@ -166,13 +166,6 @@
   line-height: 1.5;
 }
 
-/* The rare between-number-and-SAN comment stays inline so the number, comment,
-   and move read as one line ("1. {sharpest} e4"). */
-.chess-comment[data-comment-slot="mid"] {
-  display: inline;
-  margin: 0 2px;
-}
-
 /* A comment navigates to its move on click, so it gets the same light-grey
    hover/selected feedback the move tokens use (grey, not the move's accent). */
 .chess-comment:hover {

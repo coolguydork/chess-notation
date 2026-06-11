@@ -19,7 +19,6 @@ export {
   childrenOf,
   resolvePath,
   nodeAt,
-  setMidComment,
   adjacentComment,
   setAdjacentComment,
   updateComment,

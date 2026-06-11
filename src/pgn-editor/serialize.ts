@@ -45,8 +45,6 @@ function serializeLine(items: PgnItem[], out: string[], needsNumber: boolean): v
       showNumber = false;
     }
 
-    if (it.commentMid) out.push(`{ ${it.commentMid} }`);
-
     out.push(it.san);
 
     for (const n of it.nags) out.push(`$${n}`);
