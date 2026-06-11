@@ -22,6 +22,10 @@ export { nodeToPath, pathToNode };
 interface PgnViewerState {
   root: MoveNode;
   current: MoveNode;
+  // The selected element when it is a comment rather than `current`. Exactly
+  // one element highlights at a time: this comment when set, else the current
+  // move. Cleared by every other navigation/edit transition.
+  selectedCommentId: number | null;
   result: string;
   headers: Record<string, string>;
   engineArrows: EngineArrow[];
@@ -99,7 +103,7 @@ export class PgnViewer {
       onMove: (san: string, from: number, to: number, newState: BoardState) => void,
     ) => InteractiveBoardHandle,
   ) {
-    this.state = { root, current, result, headers, engineArrows: [] };
+    this.state = { root, current, selectedCommentId: null, result, headers, engineArrows: [] };
   }
 
   mount(): void {
@@ -187,12 +191,13 @@ export class PgnViewer {
         if (found) this.updateCommentOn(found.comment.source, "");
         return;
       }
-      // A comment sits at a board position — clicking it navigates there (the
-      // × above is handled first, so it still deletes).
+      // A comment sits at a board position — clicking it navigates there and
+      // selects the comment itself, not the move at that position (the × above
+      // is handled first, so it still deletes).
       const commentId = t.closest<HTMLElement>("[data-comment-id]")?.dataset.commentId;
       if (commentId) {
         const found = findCommentById(this.state.root, Number(commentId));
-        if (found) this.goTo(found.anchor);
+        if (found) this.goTo(found.anchor, found.comment.id);
         return;
       }
       const nodeId = t.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
@@ -316,7 +321,7 @@ export class PgnViewer {
     this.turnIndicatorEl.className = `chess-turn-indicator chess-turn-indicator--${color}`;
     this.turnIndicatorEl.textContent = color === "w" ? "White to move" : "Black to move";
     this.headersEl.innerHTML = buildHeaderHtml(this.state.headers);
-    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined);
+    this.moveListEl.innerHTML = buildMoveListHtml(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined, this.state.selectedCommentId);
     this.fitMoveListHeight();
     this.scrollActiveMoveIntoView();
   }
@@ -407,14 +412,16 @@ export class PgnViewer {
     }, 300);
   }
 
-  goTo(node: MoveNode): void {
+  // Navigate to `node`. `selectCommentId` carries a comment selection: the
+  // board shows `node`'s position but the highlighted element is that comment.
+  goTo(node: MoveNode, selectCommentId: number | null = null): void {
     const cur = this.state.current;
     // Clicking the hovered node: commit the preview seamlessly, no re-animation
     if (node.id === this.hoveredId) {
       this.hoveredId = null;
       this.cancelHoverAnim = null; // let in-flight animation finish naturally
       this.board.commitPreview();
-      this.state = { ...this.state, current: node, engineArrows: [] };
+      this.state = { ...this.state, current: node, selectedCommentId: selectCommentId, engineArrows: [] };
       this.render();
       this.emit("navigate");
       return;
@@ -432,7 +439,7 @@ export class PgnViewer {
       const lm = node.from >= 0 ? { from: node.from, to: node.to } : undefined;
       this.board.setState(node.state, lm);
     }
-    this.state = { ...this.state, current: node, engineArrows: [] };
+    this.state = { ...this.state, current: node, selectedCommentId: selectCommentId, engineArrows: [] };
     this.render();
     this.emit("navigate");
   }
@@ -459,7 +466,7 @@ export class PgnViewer {
     if (!n) return;
     this.clearHover();
     this.cancelAnim = this.board.animateTo(n.state, n.from, n.to, this.config, this.cancelAnim);
-    this.state = { ...this.state, current: n, engineArrows: [] };
+    this.state = { ...this.state, current: n, selectedCommentId: null, engineArrows: [] };
     this.render();
     this.emit("navigate");
   }
@@ -474,7 +481,7 @@ export class PgnViewer {
     } else {
       this.board.setState(p.state);
     }
-    this.state = { ...this.state, current: p, engineArrows: [] };
+    this.state = { ...this.state, current: p, selectedCommentId: null, engineArrows: [] };
     this.render();
     this.emit("navigate");
   }
@@ -499,7 +506,7 @@ export class PgnViewer {
     const root = projectGame(this.editor);
     const current = pathToNode(root, [...path, san]);
     this.board.setState(newState, { from, to });
-    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.state = { ...this.state, root, current, selectedCommentId: null, engineArrows: [] };
     this.render();
     this.emit("move");
   }
@@ -565,7 +572,7 @@ export class PgnViewer {
     this.cancelAnim = null;
     const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
     this.board.setState(current.state, lm);
-    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.state = { ...this.state, root, current, selectedCommentId: null, engineArrows: [] };
     this.render();
     this.emit("move");
   }
@@ -590,7 +597,7 @@ export class PgnViewer {
     this.board.endPreview();
     this.cancelAnim?.();
     this.cancelAnim = null;
-    this.state = { root, current: root, result, headers, engineArrows: [] };
+    this.state = { root, current: root, selectedCommentId: null, result, headers, engineArrows: [] };
     this.board.setState(root.state);
     this.render();
     this.emit("load-game");
@@ -619,7 +626,7 @@ export class PgnViewer {
     this.cancelAnim = null;
     const lm = current.from >= 0 ? { from: current.from, to: current.to } : undefined;
     this.board.setState(current.state, lm);
-    this.state = { ...this.state, root, current, engineArrows: [] };
+    this.state = { ...this.state, root, current, selectedCommentId: null, engineArrows: [] };
     this.render();
     this.emit("move");
   }

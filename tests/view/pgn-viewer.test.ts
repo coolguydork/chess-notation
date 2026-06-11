@@ -230,6 +230,41 @@ describe("PgnViewer (state-machine)", () => {
     });
   });
 
+  describe("comment selection", () => {
+    // The comment item in a node's tail (clicking a comment routes here as
+    // goTo(anchor, commentId)).
+    function firstTailComment(node: MoveNode): { id: number } {
+      const entry = node.tail[0];
+      if (entry?.kind !== "comment") throw new Error("expected a comment entry");
+      return entry.comment;
+    }
+
+    it("goTo with a comment id highlights only the comment, not the move at its position", () => {
+      const editor = gameFromPgn("{ a } 1. e4 { b } 1... e5 *");
+      const root = projectGame(editor);
+      const e4 = root.next!;
+      const b = firstTailComment(e4);
+      const { viewer } = makeViewer(root, root, editor);
+      viewer.goTo(e4, b.id);
+      const html = (viewer as any).moveListEl.innerHTML as string;
+      expect(html).toContain(`data-comment-id="${b.id}" data-active="true"`);
+      expect(html).not.toContain(`data-node-id="${e4.id}" data-active="true"`);
+    });
+
+    it("subsequent navigation clears the comment selection", () => {
+      const editor = gameFromPgn("1. e4 { b } 1... e5 *");
+      const root = projectGame(editor);
+      const e4 = root.next!;
+      const b = firstTailComment(e4);
+      const { viewer } = makeViewer(root, root, editor);
+      viewer.goTo(e4, b.id);
+      viewer.goNext(); // to e5 — the move highlight returns
+      const html = (viewer as any).moveListEl.innerHTML as string;
+      expect(html).not.toContain(`data-comment-id="${b.id}" data-active="true"`);
+      expect(html).toContain(`data-node-id="${e4.next!.id}" data-active="true"`);
+    });
+  });
+
   describe("commitMove", () => {
     it("extends the tree (via the editor) and emits move", () => {
       const editor = gameFromFen(STARTING_FEN);

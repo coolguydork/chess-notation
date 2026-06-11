@@ -365,6 +365,57 @@ describe("buildMoveListHtml", () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildMoveListHtml — selection (exactly one element highlights)
+// ---------------------------------------------------------------------------
+
+describe("buildMoveListHtml selection", () => {
+  // Comments at every position: before the game, after a move, leading a
+  // variation, and inside a variation line.
+  const items = pgnItems("{ a } 1. e4 { b } 1... e5 2. Nf3 Nc6 3. Bc4 $1 ( { c } 3. Bb5 $1 { d } 3... a6 ) 3... Nf6");
+
+  // The comment items in a node's tail, in order.
+  const tailComments = (node: MoveNode) =>
+    node.tail.filter((t): t is Extract<typeof t, { kind: "comment" }> => t.kind === "comment");
+
+  it("a current move does not activate its adjacent comments", () => {
+    const r = buildMoveTree(STARTING_FEN, items);
+    const e4 = r.next!;
+    const html = buildMoveListHtml(r, e4.id);
+    expect(html.match(/data-active="true"/g)).toHaveLength(1);
+    expect(html).toContain(`data-node-id="${e4.id}" data-active="true"`);
+  });
+
+  it("a current variation head does not activate its lead or trailing comments", () => {
+    const r = buildMoveTree(STARTING_FEN, items);
+    const bc4 = r.next!.next!.next!.next!.next!; // 3. Bc4
+    const bb5 = bc4.variationHeads[0];           // 3. Bb5
+    const html = buildMoveListHtml(r, bb5.id);
+    expect(html.match(/data-active="true"/g)).toHaveLength(1);
+    expect(html).toContain(`data-node-id="${bb5.id}" data-active="true"`);
+  });
+
+  it("a selected comment is the only active element — the current move is not", () => {
+    const r = buildMoveTree(STARTING_FEN, items);
+    const e4 = r.next!;
+    const b = tailComments(e4)[0].comment; // { b }
+    const html = buildMoveListHtml(r, e4.id, undefined, false, b.id);
+    expect(html.match(/data-active="true"/g)).toHaveLength(1);
+    expect(html).toContain(`data-comment-id="${b.id}" data-active="true"`);
+  });
+
+  it("a variation lead comment is selectable on its own", () => {
+    const r = buildMoveTree(STARTING_FEN, items);
+    const bc4 = r.next!.next!.next!.next!.next!;
+    const entry = bc4.tail.find((t) => t.kind === "variation");
+    if (entry?.kind !== "variation") throw new Error("expected a variation entry");
+    const c = entry.lead[0]; // { c }
+    const html = buildMoveListHtml(r, bc4.id, undefined, false, c.id);
+    expect(html.match(/data-active="true"/g)).toHaveLength(1);
+    expect(html).toContain(`data-comment-id="${c.id}" data-active="true"`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildMoveListHtml — delete control (editable blocks)
 // ---------------------------------------------------------------------------
 
@@ -384,14 +435,17 @@ describe("buildMoveListHtml delete control", () => {
     expect(buildMoveListHtml(root, e4.id)).not.toContain("data-delete-id"); // default
   });
 
-  it("emits a comment delete button when the comment's position is active", () => {
+  it("emits a comment delete button only when the comment itself is selected", () => {
     const r = buildMoveTree(STARTING_FEN, pgnItems("1. e4 { hi } 1... e5"));
     const e4Node = r.next!;
-    const html = buildMoveListHtml(r, e4Node.id, undefined, true);
-    expect(html).toContain("data-comment-delete-id");
-    // not emitted when a different move is active
-    const html2 = buildMoveListHtml(r, e4Node.next!.id, undefined, true);
-    expect(html2).not.toContain("data-comment-delete-id");
+    const entry = e4Node.tail[0];
+    if (entry.kind !== "comment") throw new Error("expected a comment entry");
+    // the anchor move being active no longer reveals the comment's delete button
+    expect(buildMoveListHtml(r, e4Node.id, undefined, true)).not.toContain("data-comment-delete-id");
+    // selecting the comment shows its delete button and suppresses the move's
+    const html = buildMoveListHtml(r, e4Node.id, undefined, true, entry.comment.id);
+    expect(html).toContain(`data-comment-delete-id="${entry.comment.id}"`);
+    expect(html).not.toContain(`data-delete-id="${e4Node.id}"`);
   });
 });
 
