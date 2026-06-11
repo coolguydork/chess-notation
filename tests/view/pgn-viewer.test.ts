@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgnViewer, type ChangeEvent } from "../../src/view/pgn-viewer";
 import type { InteractiveBoardHandle } from "../../src/view/board-handle";
@@ -67,39 +68,24 @@ function makeViewer(
   };
 
   // Minimal host that satisfies the DOM API calls in mount()
-  // (querySelector for scrollIntoView, innerHTML assignment)
   const host = {
     appendChild: vi.fn(),
   } as unknown as HTMLElement;
 
-  // We patch document.createElement to return minimal objects for mount()
-  const origCreate = typeof globalThis.document !== "undefined" ? globalThis.document.createElement.bind(globalThis.document) : null;
-
-  // Instead of a real DOM, test the state-machine methods directly by calling
-  // commitMove / goNext etc., which don't touch DOM (except render() which we stub).
-  // We need to call mount() but render() will fail without DOM — so we override
-  // render by injecting dummy elements via _boardFactory.
-
-  // Simplest approach: construct then directly call the methods under test
-  // which only touch this.state and call board methods.
-
-  // We bypass mount() by directly setting private fields via a subclass trick.
+  // We bypass mount() (board wiring, listeners, height management) by setting
+  // the viewer's element fields directly. The two re-render targets are real
+  // happy-dom elements so render()'s replaceChildren works and assertions can
+  // read their serialized innerHTML; the rest stay minimal stubs.
   class TestableViewer extends PgnViewer {
     constructor() {
       super(host, root, makeConfig(), current, "*", headers, editor, factory);
     }
-    // Expose mount logic without DOM — skip mount(), use internal boot instead
     boot(): void {
-      // Directly set the DOM-dependent fields to stubs
       (this as any).navPrevEl = { disabled: false, onclick: null };
       (this as any).navNextEl = { disabled: false, onclick: null };
       (this as any).turnIndicatorEl = { className: "", textContent: "" };
-      (this as any).moveListEl = {
-        innerHTML: "",
-        addEventListener: vi.fn(),
-        querySelector: () => null,
-      };
-      (this as any).headersEl = { innerHTML: "" };
+      (this as any).moveListEl = document.createElement("div");
+      (this as any).headersEl = document.createElement("div");
       (this as any).boardWrapperEl = {};
       // Call board factory
       const b = factory({} as HTMLElement, current.state, makeConfig(), undefined, (san, from, to, ns) => {
