@@ -25,26 +25,20 @@
 ## First-time submission to community plugins
 
 One-time steps to get listed in Obsidian's directory (after the first release
-is published):
+is published). Submission goes through Obsidian's web portal — the old
+fork-and-PR flow against `obsidianmd/obsidian-releases` was retired in 2026
+(that repo has pull requests disabled).
 
 1. Read the [submission requirements](https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins)
    and [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-2. Fork [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases)
-   and append an entry to the **end** of `community-plugins.json`:
-
-   ```json
-   {
-     "id": "chess-notation",
-     "name": "Chess Notation",
-     "author": "coolguydork",
-     "description": "Render and interact with chess boards inside your notes using FEN or PGN notation.",
-     "repo": "coolguydork/chess-notation"
-   }
-   ```
-
-   `id`, `name`, `author`, and `description` must match `manifest.json` exactly.
-3. Open a PR using their plugin template and complete its checklist.
-4. An automated review bot scans the code first; address its comments, then a
-   human review follows. Once merged, the plugin appears in Community plugins
-   and updates ship automatically from new GitHub releases — no further PRs
-   needed.
+2. Go to [community.obsidian.md](https://community.obsidian.md), sign in with
+   your Obsidian account, and link the GitHub account that owns this repo.
+3. Select **Plugins → New plugin**, enter the repository URL
+   (`https://github.com/coolguydork/chess-notation`), agree to the
+   [developer policies](https://docs.obsidian.md/Developer+policies), and
+   submit. The portal reads `manifest.json` from the default branch;
+   downloads come from the release whose tag matches its `version`.
+4. The portal runs an automated review; address feedback by fixing the code
+   and publishing a new release with an incremented version. Once approved,
+   the plugin appears in Community plugins and updates ship automatically
+   from new GitHub releases.
