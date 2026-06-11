@@ -8,12 +8,12 @@ Render interactive chess boards inside your notes using FEN or PGN notation. Nav
 
 | Feature | Summary |
 |---|---|
-| **FEN boards** | Paste any FEN string to render an interactive board. Click a piece to see its legal moves highlighted; click a destination to play the move. |
+| **FEN boards** | Paste any FEN string to render an interactive board. Move pieces by dragging, or by clicking the origin square and then the destination. |
 | **PGN game viewer** | Embed a full game and navigate it move by move with prev/next buttons, **arrow keys**, or by clicking any move token. Variations, comments, NAG glyphs, and header tags are all displayed. |
 | **Insert from PGN** | Paste a game from anywhere (Chess.com, Lichess, a database) via the *Insert chess board from PGN* command or ribbon button. Apostrophes, colons, URLs in comments, and line breaks are escaped for you, and the game is validated before it lands in your note. |
 | **Edit games in place** | Play a move on the board to extend the line or branch a variation. Right-click any move to add comments, annotation glyphs (`!`, `?`, `!!`…), delete from that point, or promote a variation to the main line. Edits are **written back to the note**. |
-| **Click-to-move** | Legal moves are highlighted with dots on destination squares. The board enforces all rules: castling, en passant, promotion (auto-queens). |
-| **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Optionally attach a text comment to the arrow. Right-drag the same arrow again to remove it. |
+| **Click-to-move** | Drag a piece or click origin then destination. Only the side to move can be picked up, illegal moves are rejected, and the board enforces all rules: castling, en passant, and promotion (a dialog lets you choose the piece). |
+| **User-drawn arrows** | Right-click-drag from one square to another to draw an annotation arrow. Left-click the board to clear your arrows. |
 | **Engine analysis** | An analysis panel powered by any UCI engine — Stockfish is auto-discovered, and the panel appears automatically whenever an engine is found. Colored arrows show the top moves; a score list shows evaluations and principal variations. Click a suggested move to graft it into the game as a variation. |
 | **Six board themes** | `classic`, `blue`, `green`, `dark`, `walnut`, `purple` — set per block or as a plugin default. |
 | **Board orientation** | Flip any board to Black's perspective with `orientation: black`, or with the flip (⇆) button. |
@@ -110,7 +110,7 @@ All blocks use a `chess` fenced code block. The body is a YAML mapping. Unknown 
 fen: <FEN string>
 ```
 
-Renders an interactive board. You can click any piece of the side to move to see its legal moves highlighted, then click a destination square to make the move. The board tracks the position locally — it does not modify your note.
+Renders an interactive board. Move pieces by dragging, or by clicking the origin square and then the destination — only the side to move can be picked up, and illegal moves are rejected. Your first move inserts a `pgn:` line into the block, so the line you play is saved in your note (see [Editing & annotating games](#editing--annotating-games)).
 
 **Options:**
 
@@ -240,15 +240,12 @@ See [Engine analysis](#engine-analysis) for setup instructions.
 
 ### User-drawn arrows
 
-Draw your own annotation arrows directly on any interactive FEN board.
+Draw your own annotation arrows directly on any chess board.
 
 | Gesture | Effect |
 |---|---|
 | **Right-click drag** from square A to square B | Draws an orange arrow from A → B |
-| **Right-click drag** the same arrow again | Removes the arrow |
-| **Right-click** on a single square (no drag) | Removes all arrows originating from that square |
-
-After drawing an arrow a small floating input appears — type a comment and press **Enter** to attach it as a label on the arrow, or press **Esc** / click outside to skip.
+| **Left-click** anywhere on the board | Clears all your arrows |
 
 **Example — annotate a key idea:**
 
@@ -258,9 +255,9 @@ fen: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
 ```
 ````
 
-Open the note, right-click-drag from **f3** to **e5** to draw a "knight attacks" arrow, then type `Knight fork threat` as the comment.
+Open the note and right-click-drag from **f3** to **e5** to draw a "knight attacks" arrow.
 
-Arrows are in-memory — they reset when the note is closed. Engine analysis arrows and user arrows coexist independently.
+Arrows are in-memory — they reset when you navigate to another move or close the note. Engine analysis arrows and user arrows coexist independently.
 
 ---
 
@@ -438,11 +435,8 @@ See [Plugin settings](#plugin-settings) above.
 
 ## Keyboard and touch
 
-- **Click or tap** a piece to select it. Legal destination squares appear as dots.
-- **Click or tap** a highlighted dot to move the piece there.
-- **Click or tap** elsewhere to deselect.
-- **Right-click drag** from one square to another to draw an annotation arrow.
-- **Right-click drag** the same arrow again to remove it.
+- **Click or tap** a piece, then its destination square, to move — or **drag** the piece there. Only the side to move can be picked up; illegal moves are rejected.
+- **Right-click drag** from one square to another to draw an annotation arrow; **left-click** the board to clear your arrows.
 - In the PGN viewer, **click any move token** in the move list to jump to that position.
 - **← / → arrow keys** step backward/forward through the current line once the board has focus (click or tab to it). The keys are scoped to the focused board, so multiple games on one page don't interfere; a focus ring shows which board is active.
 - The prev/next buttons have a minimum tap target of 44 × 36 px for comfortable mobile use.
