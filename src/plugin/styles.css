@@ -37,6 +37,14 @@
   touch-action: manipulation; /* prevents 300ms tap delay on mobile */
 }
 
+/* Round the board to match the Study move/variation cards. overflow:hidden clips
+   the corner squares (and their coordinate labels) to the radius; the board lib
+   paints squares edge-to-edge so the rounding reads cleanly. */
+.chess-board {
+  border-radius: 9px;
+  overflow: hidden;
+}
+
 .chess-board-wrapper {
   position: relative;
 }
@@ -396,18 +404,38 @@
   border-color: #222;
 }
 
-/* Analysis panel */
+/* ===========================================================================
+   Analysis panel — "Study" layout
+   The engine output reads as a note/variation card: bordered, rounded, secondary
+   fill, with an "Engine" eyebrow. Each line is a hover-pill row with a colour
+   badge score (like a NAG) and pill PV tokens (like .chess-move).
+   =========================================================================== */
 .chess-analysis-container {
   display: inline-flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
 }
 
 .chess-analysis-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  padding: 11px 13px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+}
+
+/* Eyebrow tying the card to the note/result-pill system. */
+.chess-analysis-panel::before {
+  content: "Engine";
+  font-family: var(--font-interface);
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .chess-analyze-btn {
@@ -430,8 +458,8 @@
 
 .chess-eval-bar {
   position: relative;
-  height: 10px;
-  border-radius: 3px;
+  height: 12px;
+  border-radius: 6px;
   background: var(--background-modifier-border);
   overflow: hidden;
   display: flex;
@@ -445,7 +473,7 @@
   bottom: 0;
   background: var(--text-normal);
   transition: width 0.3s ease;
-  border-radius: 3px 0 0 3px;
+  border-radius: 6px 0 0 6px;
 }
 
 .chess-eval-bar-label {
@@ -463,15 +491,24 @@
 .chess-analysis-output {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   font-family: var(--font-monospace);
   font-size: 0.85em;
 }
 
+/* Each candidate line: a padded pill row that highlights on hover, mirroring the
+   move tokens in the Study list. */
 .chess-analysis-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: baseline;
+  padding: 4px 7px;
+  border-radius: 7px;
+  transition: background 0.1s ease;
+}
+
+.chess-analysis-row:hover {
+  background: var(--background-modifier-hover);
 }
 
 .chess-analysis-rank {
@@ -481,16 +518,24 @@
   flex-shrink: 0;
 }
 
+/* Score as a colour badge, same shape language as the NAG badges. */
 .chess-analysis-score {
-  min-width: 4.5em;
-  text-align: right;
-  font-weight: 600;
+  min-width: 3.6em;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 0.92em;
+  letter-spacing: -0.3px;
   color: var(--text-accent);
+  background: color-mix(in srgb, var(--text-accent) 15%, transparent);
   flex-shrink: 0;
 }
 
 .chess-analysis-score--mate {
-  color: var(--color-orange, #e8a060);
+  color: #cc7322;
+  background: color-mix(in srgb, #cc7322 18%, transparent);
 }
 
 .chess-analysis-pv {
@@ -504,13 +549,14 @@
 .chess-pv-move {
   background: none;
   border: none;
-  padding: 0 3px;
-  border-radius: 3px;
+  padding: 1px 6px;
+  border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.5;
+  transition: background 0.1s ease;
 }
 
 .chess-pv-move:hover {
@@ -543,29 +589,38 @@
   margin: 0;
 }
 
-/* Game-info header strip: every PGN tag as an aligned key/value grid */
+/* Game-info header strip: every PGN tag as an aligned key/value grid, carded to
+   match the Study move list — same border, radius, and secondary fill as the
+   note + variation cards, with keys as faint uppercase labels (the "Note"
+   eyebrow treatment) and values in the interface font. */
 .chess-headers {
   display: grid;
   grid-template-columns: auto 1fr;
-  column-gap: 12px;
-  row-gap: 2px;
+  column-gap: 14px;
+  row-gap: 6px;
   align-items: baseline;
-  margin-bottom: 8px;
-  padding: 6px 10px;
+  margin-bottom: 10px;
+  padding: 11px 14px;
   background: var(--background-secondary);
-  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
   font-size: 0.85em;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .chess-header-key {
-  color: var(--text-muted);
-  font-weight: 600;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  font-weight: 700;
+  font-size: 0.82em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .chess-header-value {
   color: var(--text-normal);
+  font-family: var(--font-interface);
   overflow-wrap: anywhere; /* let long values like FEN wrap */
 }
 
