@@ -65,7 +65,7 @@
 .chess-nav button {
   padding: 4px 12px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   color: var(--text-normal);
@@ -79,6 +79,12 @@
 .chess-nav button:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* Collapse/expand-all-variations toggle: same chrome as the nav buttons; the
+   viewer hides it (display:none) when the game has no variations. */
+.chess-nav-vars {
+  font-size: 0.95em;
 }
 
 /* Move-list scroll region. The list grows with every move; without a cap a long
@@ -101,26 +107,34 @@
   scrollbar-width: thin;
 }
 
+/* ===========================================================================
+   Move list — "Study" layout
+   Moves are pill tokens, annotations are colour-coded badges, comments read as
+   note cards, and variations are collapsible, depth-tinted cards. Everything is
+   driven by Obsidian theme variables so it tracks light/dark automatically.
+   =========================================================================== */
 .chess-move-list {
   font-family: var(--font-monospace);
   font-size: 0.85em;
-  line-height: 1.8;
+  line-height: 2;
   max-width: 100%;
 }
 
 .chess-move-number {
-  color: var(--text-muted);
-  margin-right: 3px;
+  color: var(--text-faint);
+  margin: 0 4px 0 0;
 }
 
 .chess-move {
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 2px 8px;
+  border-radius: 7px;
   cursor: pointer;
   touch-action: manipulation;
   min-height: 28px;
   display: inline-flex;
   align-items: center;
+  color: var(--text-normal);
+  transition: background 0.1s ease;
 }
 
 .chess-move:hover {
@@ -130,62 +144,158 @@
 .chess-move[data-active="true"] {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
-  border-radius: 3px;
-}
-
-.chess-result {
-  margin-left: 6px;
-  color: var(--text-muted);
   font-weight: 600;
 }
 
-/* NAG glyphs: !, ?, !?, etc. — inline, immediately after the move token */
-.chess-nags {
-  font-size: 0.85em;
+/* Game result, rendered as a small status pill at the end of the line. */
+.chess-result {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: 0.72em;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* NAG badges: !, ?, !?, etc. — one badge per glyph, immediately after the move.
+   Move-quality NAGs (1–6) get a category colour; the rest inherit the accent. */
+.chess-nags {
+  display: inline-flex;
+  gap: 3px;
+  margin: 0 2px 0 4px;
+  vertical-align: baseline;
+}
+
+.chess-nag {
+  font-size: 0.82em;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  padding: 1px 6px;
+  border-radius: 5px;
   color: var(--text-accent);
-  margin: 0 3px 0 1px;
-  letter-spacing: -0.5px;
+  background: color-mix(in srgb, var(--text-accent) 15%, transparent);
 }
 
-.chess-variation .chess-nags {
-  opacity: 0.8;
-}
+.chess-nag--good       { color: #2f9a4e; background: color-mix(in srgb, #2f9a4e 16%, transparent); }
+.chess-nag--brilliant  { color: #159487; background: color-mix(in srgb, #159487 16%, transparent); }
+.chess-nag--interesting{ color: #4f74e0; background: color-mix(in srgb, #4f74e0 16%, transparent); }
+.chess-nag--dubious    { color: #bd8a26; background: color-mix(in srgb, #bd8a26 18%, transparent); }
+.chess-nag--mistake    { color: #cc7322; background: color-mix(in srgb, #cc7322 18%, transparent); }
+.chess-nag--blunder    { color: #cf4a4a; background: color-mix(in srgb, #cf4a4a 18%, transparent); }
 
-/* Annotation comments: block element so they sit on their own line,
-   italic and muted to distinguish from moves */
+/* Annotation comments: a note card on its own line. A "Note" eyebrow (CSS only)
+   sets them apart from the moves; the whole card navigates to its position. */
 .chess-comment {
   display: block;
-  font-style: italic;
+  font-family: var(--font-interface);
+  font-style: normal;
   color: var(--text-muted);
   font-size: 0.82em;
-  margin: 0 0 2px 4px;
-  padding: 0 4px;
-  border-radius: 3px;
-  cursor: pointer;
   line-height: 1.5;
+  margin: 6px 0 6px 2px;
+  padding: 7px 11px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  cursor: pointer;
 }
 
-/* A comment navigates to its move on click, so it gets the same light-grey
-   hover/selected feedback the move tokens use (grey, not the move's accent). */
+.chess-comment::before {
+  content: "Note";
+  display: block;
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+
 .chess-comment:hover {
+  border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
   background: var(--background-modifier-hover);
 }
 
 .chess-comment[data-active="true"] {
+  border-color: var(--interactive-accent);
   background: var(--background-modifier-hover);
 }
 
-/* Variations are block-level: each one drops onto its own indented line
-   with a left border, visually separating it from the main line. */
+/* Lead comments inside a variation are tighter and lose the eyebrow — they read
+   as the variation's own intro line, not a fresh note. */
+.chess-variation-body > .chess-comment {
+  margin: 0 0 6px;
+  padding: 4px 0 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.chess-variation-body > .chess-comment::before {
+  display: none;
+}
+
+/* Variations: a collapsible card, indented and tinted by nesting depth. */
 .chess-variation {
   display: block;
-  margin: 1px 0 1px 2px;
-  padding-left: 8px;
-  border-left: 2px solid var(--background-modifier-border);
+  margin: 8px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid color-mix(in srgb, var(--interactive-accent) 62%, transparent);
+  border-radius: 9px;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 0.9em;
-  line-height: 1.7;
+}
+
+.chess-variation-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-family: var(--font-interface);
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.chess-variation-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Custom disclosure caret (the native triangle is hidden above). */
+.chess-variation-caret {
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+.chess-variation[open] > .chess-variation-summary .chess-variation-caret {
+  transform: rotate(90deg);
+}
+
+/* The literal PGN parens are kept in the DOM (model/test parity) but hidden. */
+.chess-variation-paren {
+  display: none;
+}
+
+.chess-variation-body {
+  display: block;
+  padding: 8px 11px;
+  line-height: 1.9;
 }
 
 .chess-variation .chess-move {
@@ -202,15 +312,15 @@
   color: var(--text-on-accent);
 }
 
-/* Nested variation: same size, slightly dimmer */
+/* Depth tinting: each nested level steps the left rail down in opacity. */
 .chess-variation .chess-variation {
+  margin: 8px 0 2px;
   font-size: 1em;
-  opacity: 0.85;
+  border-left-color: color-mix(in srgb, var(--interactive-accent) 44%, transparent);
 }
 
-.chess-variation-paren {
-  color: var(--text-faint);
-  margin: 0 1px;
+.chess-variation .chess-variation .chess-variation {
+  border-left-color: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
 }
 
 .chess-delete-btn {
@@ -304,7 +414,7 @@
   align-self: flex-start;
   padding: 4px 14px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   color: var(--text-normal);

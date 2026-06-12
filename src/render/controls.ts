@@ -31,6 +31,17 @@ function nagSymbol(n: number): string {
   return NAG_SYMBOLS[n] ?? `$${n}`;
 }
 
+// Move-quality NAGs (1–6) carry a colour category so the badge can signal how
+// good/bad the move was at a glance. Everything else (positional assessments,
+// "with idea", etc.) stays neutral and inherits the accent colour.
+const NAG_CATEGORY: Record<number, string> = {
+  1: "good", 2: "mistake", 3: "brilliant", 4: "blunder", 5: "interesting", 6: "dubious",
+};
+
+function nagCategory(n: number): string | null {
+  return NAG_CATEGORY[n] ?? null;
+}
+
 // All output is built with the DOM API and textContent — never HTML strings —
 // so PGN-sourced text (SAN, comments, headers) needs no escaping and can't
 // inject markup. `document` comes from the host environment (Obsidian, a
@@ -40,6 +51,13 @@ function el(tag: string, cls: string, text?: string): HTMLElement {
   e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+
+// Human-readable address of a move ("3. Bc4" / "3… Nf6"), used to title the
+// variation card it heads ("alternative to 3. Bc4").
+function moveLabel(node: MoveNode): string {
+  const dots = node.color === "w" ? "." : "\u2026";
+  return `${node.moveNumber}${dots} ${node.san ?? ""}`.trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -101,18 +119,39 @@ function commentEl(c: { id: number; text: string }, active: boolean, editable: b
 // Emit a node's tail — the comments and variations that followed it in the
 // text, in source order. Returns whether anything was emitted (the caller
 // re-shows the next move number after a break).
+//
+// Variations render as a collapsible <details> card titled by the move they
+// branch from. The literal "(" / ")" parens are still emitted (hidden in CSS)
+// so the serialized structure — and its tests — stay stable, and so the model
+// round-trips unchanged.
 function renderTail(node: MoveNode, currentId: number, activeCommentId: number | null, out: HTMLElement, editable: boolean): boolean {
   for (const entry of node.tail) {
     if (entry.kind === "comment") {
       out.appendChild(commentEl(entry.comment, entry.comment.id === activeCommentId, editable));
     } else {
-      const variation = el("span", "chess-variation");
-      variation.appendChild(el("span", "chess-variation-paren", "("));
+      const variation = document.createElement("details");
+      variation.className = "chess-variation";
+      variation.open = true;
+
+      const summary = document.createElement("summary");
+      summary.className = "chess-variation-summary";
+      summary.appendChild(el("span", "chess-variation-caret"));
+      summary.appendChild(el(
+        "span",
+        "chess-variation-label",
+        node.san ? `Variation · alternative to ${moveLabel(node)}` : "Variation",
+      ));
+      summary.appendChild(el("span", "chess-variation-paren", "("));
+      variation.appendChild(summary);
+
+      const body = el("span", "chess-variation-body");
       for (const leadComment of entry.lead) {
-        variation.appendChild(commentEl(leadComment, leadComment.id === activeCommentId, editable));
+        body.appendChild(commentEl(leadComment, leadComment.id === activeCommentId, editable));
       }
-      renderLine(entry.head, currentId, activeCommentId, variation, /* firstInLine */ true, editable);
-      variation.appendChild(el("span", "chess-variation-paren", ")"));
+      renderLine(entry.head, currentId, activeCommentId, body, /* firstInLine */ true, editable);
+      body.appendChild(el("span", "chess-variation-paren", ")"));
+      variation.appendChild(body);
+
       out.appendChild(variation);
     }
   }
@@ -139,9 +178,16 @@ function renderLine(head: MoveNode, currentId: number, activeCommentId: number |
     if (cur.id === currentId) move.dataset.active = "true";
     out.appendChild(move);
 
-    // NAG glyphs inline right after the move token (!, ?, !?, etc.)
+    // NAG glyphs right after the move token. Each glyph is its own badge so a
+    // move-quality NAG (!, ?, !?, …) can be colour-coded by category; the
+    // outer .chess-nags wrapper is retained as the stable hook.
     if (cur.nags?.length) {
-      out.appendChild(el("span", "chess-nags", cur.nags.map(nagSymbol).join("")));
+      const nags = el("span", "chess-nags");
+      for (const n of cur.nags) {
+        const cat = nagCategory(n);
+        nags.appendChild(el("span", cat ? `chess-nag chess-nag--${cat}` : "chess-nag", nagSymbol(n)));
+      }
+      out.appendChild(nags);
     }
 
     // Delete control on the active move (editable blocks only)
@@ -160,4 +206,3 @@ function renderLine(head: MoveNode, currentId: number, activeCommentId: number |
     cur = cur.next;
   }
 }
-

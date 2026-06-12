@@ -59,11 +59,18 @@ export class PgnViewer {
   private boardWrapperEl!: HTMLElement;
   private navPrevEl!: HTMLButtonElement;
   private navNextEl!: HTMLButtonElement;
+  // "Collapse/expand all variations" toggle (added by mount). Tests mount a bare
+  // skeleton without it, so it is nullable and every use is guarded.
+  private navVarsEl: HTMLButtonElement | null = null;
   private moveListEl!: HTMLElement;
   private headersEl!: HTMLElement;
   private turnIndicatorEl!: HTMLElement;
   private board!: InteractiveBoardHandle;
   private hoveredId: number | null = null;
+  // Whether every variation card is currently collapsed. Held on the viewer (not
+  // the DOM) so the choice survives the full move-list rebuild that each
+  // navigation/edit triggers.
+  private variationsCollapsed = false;
   private cancelAnim: (() => void) | null = null;
   private cancelHoverAnim: (() => void) | null = null;
   // --- Move-list height management (auto-fit short games + drag-to-resize persist) ---
@@ -142,6 +149,16 @@ export class PgnViewer {
     navFlipEl.title = "Flip board";
     navEl.appendChild(navFlipEl);
     navFlipEl.onclick = () => this.flipOrientation();
+
+    // Collapse/expand every variation card at once. Hidden by applyVariationCollapse()
+    // whenever the current game has no variations.
+    const navVarsEl = document.createElement("button");
+    navVarsEl.className = "chess-nav-vars";
+    navVarsEl.textContent = "⊟";
+    navVarsEl.title = "Collapse all variations";
+    navEl.appendChild(navVarsEl);
+    navVarsEl.onclick = () => this.toggleAllVariations();
+    this.navVarsEl = navVarsEl;
 
     this.turnIndicatorEl = document.createElement("div");
     this.turnIndicatorEl.className = "chess-turn-indicator";
@@ -324,12 +341,35 @@ export class PgnViewer {
     this.headersEl.replaceChildren(...(headerEl ? [headerEl] : []));
     const listEl = buildMoveListEl(this.state.root, this.state.current.id, this.state.result, this.editor !== undefined, this.state.selectedCommentId);
     this.moveListEl.replaceChildren(...(listEl ? [listEl] : []));
+    // Re-apply the global collapse state to the freshly-built cards before we
+    // measure height, so a collapsed view stays collapsed across navigation.
+    this.applyVariationCollapse();
     this.fitMoveListHeight();
     this.scrollActiveMoveIntoView();
   }
 
   private scrollActiveMoveIntoView(): void {
     this.moveListEl.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Variation collapse: one toggle folds/unfolds every variation card. The
+  // state lives on the viewer and is re-applied after each render (the move list
+  // is rebuilt on every navigation), so the choice persists as you move around.
+  // ---------------------------------------------------------------------------
+
+  private toggleAllVariations(): void {
+    this.variationsCollapsed = !this.variationsCollapsed;
+    this.applyVariationCollapse();
+  }
+
+  private applyVariationCollapse(): void {
+    const vars = this.moveListEl.querySelectorAll<HTMLDetailsElement>("details.chess-variation");
+    vars.forEach((v) => { v.open = !this.variationsCollapsed; });
+    if (!this.navVarsEl) return; // bare test skeleton has no nav control
+    this.navVarsEl.style.display = vars.length === 0 ? "none" : "";
+    this.navVarsEl.textContent = this.variationsCollapsed ? "⊞" : "⊟";
+    this.navVarsEl.title = this.variationsCollapsed ? "Expand all variations" : "Collapse all variations";
   }
 
   // ---------------------------------------------------------------------------
