@@ -254,8 +254,12 @@ export class PgnViewer {
       this.moveMenuHandler(node, this.isVariationHead(node), e);
     });
 
-    // Hover preview — animate the piece to the hovered position
+    // Hover preview — animate the piece to the hovered position. Mouse only:
+    // a touch tap fires pointerover immediately before click, so on mobile the
+    // preview would animate the move and the click would then play it again —
+    // the move renders twice. Touch has no real hover, so skip entirely.
     this.moveListEl.addEventListener("pointerover", (e) => {
+      if (e.pointerType !== "mouse") return;
       const id = (e.target as HTMLElement).closest<HTMLElement>("[data-node-id]")?.dataset.nodeId;
       if (!id) return;
       const n = Number(id);
