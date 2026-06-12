@@ -515,3 +515,55 @@ describe("PgnViewer (state-machine)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mounted-DOM tests: unlike makeViewer() above, these run the real mount() so
+// the move-list event listeners are wired, and drive them with dispatched
+// events. happy-dom provides PointerEvent with pointerType.
+// ---------------------------------------------------------------------------
+
+describe("PgnViewer move-list events (mounted)", () => {
+  function mountViewer() {
+    const stub = {
+      getState: () => ({} as BoardState),
+      setState: vi.fn(),
+      setEngineArrows: vi.fn(),
+      animateTo: vi.fn(() => () => {}),
+      animatedPreview: vi.fn(() => () => {}),
+      commitPreview: vi.fn(),
+      preview: vi.fn(),
+      endPreview: vi.fn(),
+    } satisfies InteractiveBoardHandle;
+    const host = document.createElement("div");
+    const root = buildMoveTree(STARTING_FEN, [
+      { san: "e4", moveNumber: 1, color: "w" },
+      { san: "e5", moveNumber: 1, color: "b" },
+    ]);
+    const viewer = new PgnViewer(host, root, makeConfig(), root, "*", {}, undefined, () => stub);
+    viewer.mount();
+    return { viewer, stub, host };
+  }
+
+  it("touch tap navigates exactly once — no hover preview (iOS double-render regression)", () => {
+    const { stub, host } = mountViewer();
+    const moveEl = host.querySelector<HTMLElement>("[data-node-id]")!;
+
+    // On iOS a tap fires pointerover (pointerType "touch") immediately before
+    // click. The preview must not fire, or the move renders twice.
+    moveEl.dispatchEvent(new PointerEvent("pointerover", { pointerType: "touch", bubbles: true }));
+    expect(stub.animatedPreview).not.toHaveBeenCalled();
+    expect(stub.preview).not.toHaveBeenCalled();
+
+    moveEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Navigation goes through the single normal animate path, not commit-preview.
+    expect(stub.animateTo).toHaveBeenCalledTimes(1);
+    expect(stub.commitPreview).not.toHaveBeenCalled();
+  });
+
+  it("mouse hover still previews the move", () => {
+    const { stub, host } = mountViewer();
+    const moveEl = host.querySelector<HTMLElement>("[data-node-id]")!;
+    moveEl.dispatchEvent(new PointerEvent("pointerover", { pointerType: "mouse", bubbles: true }));
+    expect(stub.animatedPreview).toHaveBeenCalledTimes(1);
+  });
+});
