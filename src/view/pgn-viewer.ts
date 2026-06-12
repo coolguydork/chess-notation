@@ -365,7 +365,7 @@ export class PgnViewer {
 
   private applyVariationCollapse(): void {
     const vars = this.moveListEl.querySelectorAll<HTMLDetailsElement>("details.chess-variation");
-    vars.forEach((v) => { v.open = !this.variationsCollapsed; });
+    for (const v of vars) v.open = !this.variationsCollapsed;
     if (!this.navVarsEl) return; // bare test skeleton has no nav control
     this.navVarsEl.style.display = vars.length === 0 ? "none" : "";
     this.navVarsEl.textContent = this.variationsCollapsed ? "⊞" : "⊟";
