@@ -53,8 +53,8 @@ function el(tag: string, cls: string, text?: string): HTMLElement {
   return e;
 }
 
-// Human-readable address of a move ("3. Bc4" / "3… Nf6"), used to title the
-// variation card it heads ("alternative to 3. Bc4").
+// Human-readable address of a move ("3. Bc4" / "3… Nf6"). Used to title each
+// variation card by its own first move ("3. Bb5 Variation").
 function moveLabel(node: MoveNode): string {
   const dots = node.color === "w" ? "." : "\u2026";
   return `${node.moveNumber}${dots} ${node.san ?? ""}`.trim();
@@ -120,8 +120,11 @@ function commentEl(c: { id: number; text: string }, active: boolean, editable: b
 // text, in source order. Returns whether anything was emitted (the caller
 // re-shows the next move number after a break).
 //
-// Variations render as a collapsible <details> card titled by the move they
-// branch from. The literal "(" / ")" parens are still emitted (hidden in CSS)
+// Variations render as a collapsible <details> card titled by their own first
+// move (so collapsed siblings read distinctly — "4. Ng5 Variation" vs
+// "4. Nc3 Variation" — instead of all naming the move they branch from). The
+// head id is stamped on the card so the viewer can keep one card open across
+// the move-list rebuild. The literal "(" / ")" parens are still emitted (hidden in CSS)
 // so the serialized structure — and its tests — stay stable, and so the model
 // round-trips unchanged.
 function renderTail(node: MoveNode, currentId: number, activeCommentId: number | null, out: HTMLElement, editable: boolean): boolean {
@@ -132,6 +135,9 @@ function renderTail(node: MoveNode, currentId: number, activeCommentId: number |
       const variation = document.createElement("details");
       variation.className = "chess-variation";
       variation.open = true;
+      // Stable per-variation key (the head move's id survives navigation
+      // rebuilds) so the viewer can preserve an individually opened card.
+      if (entry.head) variation.dataset.variationHead = String(entry.head.id);
 
       const summary = document.createElement("summary");
       summary.className = "chess-variation-summary";
@@ -139,7 +145,7 @@ function renderTail(node: MoveNode, currentId: number, activeCommentId: number |
       summary.appendChild(el(
         "span",
         "chess-variation-label",
-        node.san ? `Variation · alternative to ${moveLabel(node)}` : "Variation",
+        entry.head?.san ? `${moveLabel(entry.head)} Variation` : "Variation",
       ));
       summary.appendChild(el("span", "chess-variation-paren", "("));
       variation.appendChild(summary);

@@ -71,6 +71,14 @@ export class PgnViewer {
   // the DOM) so the choice survives the full move-list rebuild that each
   // navigation/edit triggers.
   private variationsCollapsed = false;
+  // Per-card manual open/close overrides, keyed by the variation head's node id,
+  // recording deviations from the global default. This is what lets a card the
+  // user opened inside a collapsed view stay open as they click through its
+  // moves (each click rebuilds the list). Cleared by collapse/expand-all.
+  private variationOverrides = new Map<number, boolean>();
+  // The open state we last applied to each card programmatically, so the toggle
+  // listener can tell a genuine user click apart from our own re-application.
+  private variationApplied = new Map<number, boolean>();
   private cancelAnim: (() => void) | null = null;
   private cancelHoverAnim: (() => void) | null = null;
   // --- Move-list height management (auto-fit short games + drag-to-resize persist) ---
@@ -285,6 +293,25 @@ export class PgnViewer {
       this.clearHover();
     });
 
+    // Variation cards are native <details>. A user clicking a summary toggles
+    // one card; record that as an override so the next render keeps it. The
+    // toggle event doesn't bubble, so listen in the capture phase. We ignore the
+    // toggles our own applyVariationCollapse() causes by comparing against the
+    // state we last set.
+    this.moveListEl.addEventListener("toggle", (e) => {
+      const d = e.target as HTMLElement;
+      if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("chess-variation")) return;
+      const key = d.dataset.variationHead;
+      if (key === undefined) return;
+      const id = Number(key);
+      // Our own re-application sets `variationApplied` to match — skip those.
+      if (this.variationApplied.get(id) === d.open) return;
+      const def = !this.variationsCollapsed;
+      if (d.open === def) this.variationOverrides.delete(id);
+      else this.variationOverrides.set(id, d.open);
+      this.variationApplied.set(id, d.open);
+    }, true);
+
     // Initial render
     this.render();
   }
@@ -364,12 +391,25 @@ export class PgnViewer {
 
   private toggleAllVariations(): void {
     this.variationsCollapsed = !this.variationsCollapsed;
+    // Collapse-all / expand-all is a clean reset: drop any per-card overrides so
+    // every card follows the new global default.
+    this.variationOverrides.clear();
     this.applyVariationCollapse();
   }
 
   private applyVariationCollapse(): void {
     const vars = this.moveListEl.querySelectorAll<HTMLDetailsElement>("details.chess-variation");
-    for (const v of vars) v.open = !this.variationsCollapsed;
+    const def = !this.variationsCollapsed;
+    // Rebuilt DOM: forget last-applied state for cards that no longer exist.
+    this.variationApplied.clear();
+    for (const v of vars) {
+      const key = v.dataset.variationHead;
+      const id = key !== undefined ? Number(key) : null;
+      const override = id !== null ? this.variationOverrides.get(id) : undefined;
+      const open = override !== undefined ? override : def;
+      v.open = open;
+      if (id !== null) this.variationApplied.set(id, open);
+    }
     if (!this.navVarsEl) return; // bare test skeleton has no nav control
     this.navVarsEl.style.display = vars.length === 0 ? "none" : "";
     this.navVarsEl.textContent = this.variationsCollapsed ? "⊞" : "⊟";
@@ -562,6 +602,7 @@ export class PgnViewer {
   // node on its old path — the deleted move's parent if current was removed.
   deleteMove(node: MoveNode): void {
     if (!this.editor) return;
+    if (!this.confirmDelete("Are you sure?")) return;
     removeAt(this.editor, nodeToPath(node));
     this.refreshAfterEdit();
   }
@@ -591,11 +632,24 @@ export class PgnViewer {
   }
 
   // Replace the text of an existing comment item (addressed by identity);
-  // empty string removes it.
+  // empty string removes it. The removal case is a delete, so it confirms;
+  // a genuine text edit does not.
   updateCommentOn(comment: PgnComment, text: string): void {
     if (!this.editor) return;
+    if (text === "" && !this.confirmDelete("Are you sure?")) return;
     updateComment(this.editor, comment, text);
     this.refreshAfterEdit();
+  }
+
+  // Confirm a destructive action before it runs. Every delete path — the inline
+  // × buttons on moves and comments, and the "Delete from here" / "Delete
+  // comment" context-menu items (which all route through deleteMove /
+  // updateCommentOn) — funnels through here, so the prompt is defined in exactly
+  // one place. Guarded for non-browser hosts (unit tests) where window.confirm
+  // is absent: there we proceed without prompting.
+  private confirmDelete(message: string): boolean {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+    return window.confirm(message);
   }
 
   // Replace `node`'s NAG list (e.g. [1] for "!", [] to clear).
